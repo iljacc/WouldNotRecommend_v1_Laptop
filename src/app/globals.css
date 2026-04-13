@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --foreground: rgba(255, 255, 255, 0.72);
+  --background: #000000;
+}
+
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  cursor: none;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-mono);
+}
+
+button {
+  font: inherit;
+}
+
+/* Quiet the default Google Street View interface for kiosk display. */
+.gm-style > div:first-child > div:nth-child(2),
+.gm-style > div:first-child > div:nth-child(3),
+.gm-style .gm-iv-address,
+.gm-style .gm-compass,
+.gm-style .gm-control-active,
+.gm-style .gm-fullscreen-control,
+.gm-style .gm-bundled-control,
+.gm-style .gm-sv-label,
+.gm-style .gmnoprint,
+.gm-style .gm-style-mtc,
+.gm-style [class*="watermark"],
+.gm-style .gm-iv-short-address-description,
+a[href*="maps.google.com/maps"],
+a[href*="google.com/maps"] {
+  display: none !important;
+}
+
+.gm-style .gm-style-cc,
+.gm-style a[title="Report errors in the road map or imagery to Google"] {
+  display: none !important;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
