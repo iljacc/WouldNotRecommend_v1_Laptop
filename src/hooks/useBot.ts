@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot } from "@/engine/bot";
-import { BotState, type BotContext, type BotMode, type LatLng, type TeleportPhase } from "@/lib/types";
+import {
+  BotState,
+  type BotContext,
+  type BotMode,
+  type LatLng,
+  type SessionStats,
+  type TeleportPhase,
+} from "@/lib/types";
 
 export interface BotUIState {
   mode: BotMode;
@@ -19,6 +26,9 @@ export function useBot() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isStarted, setIsStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lifetimeReviewsTotal, setLifetimeReviewsTotal] = useState<number | null>(
+    null,
+  );
   const [uiState, setUIState] = useState<BotUIState>({
     mode: "Searching",
     state: BotState.WANDER,
@@ -40,6 +50,37 @@ export function useBot() {
       teleportPhase: context.teleportPhase,
     });
   }, []);
+
+  const refreshLifetimeReviews = useCallback(async () => {
+    try {
+      const response = await fetch("/api/log");
+      if (!response.ok) return;
+      const data = (await response.json()) as SessionStats;
+      if (typeof data.totalReviewsRead === "number") {
+        setLifetimeReviewsTotal(data.totalReviewsRead);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLifetimeReviews();
+  }, [refreshLifetimeReviews]);
+
+  const lastSessionReviewCount = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = lastSessionReviewCount.current;
+    lastSessionReviewCount.current = uiState.reviewCount;
+
+    if (prev !== null && uiState.reviewCount > prev) {
+      const timer = window.setTimeout(() => {
+        void refreshLifetimeReviews();
+      }, 900);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [uiState.reviewCount, refreshLifetimeReviews]);
 
   const startBot = useCallback(async () => {
     if (!containerRef.current || botRef.current) return;
@@ -74,6 +115,7 @@ export function useBot() {
   return {
     containerRef,
     uiState,
+    lifetimeReviewsTotal,
     isStarted,
     error,
     startBot,

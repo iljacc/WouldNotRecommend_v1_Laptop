@@ -16,7 +16,7 @@ export function PulsingDot({ mode }: Props) {
   return (
     <div
       aria-hidden="true"
-      className="rounded-full bg-white"
+      className="shrink-0 rounded-full bg-white"
       style={{
         width: PULSING_DOT.SIZE,
         height: PULSING_DOT.SIZE,

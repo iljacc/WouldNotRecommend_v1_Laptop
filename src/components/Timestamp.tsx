@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HudChip } from "./HudChip";
 
 interface Props {
   startTime: number;
@@ -28,8 +29,10 @@ export function Timestamp({ startTime }: Props) {
   }, [startTime]);
 
   return (
-    <span className="text-xs text-white/60 tabular-nums">
-      {formatElapsed(elapsed)}
-    </span>
+    <HudChip>
+      <span className="text-xs text-white/60 tabular-nums">
+        {formatElapsed(elapsed)}
+      </span>
+    </HudChip>
   );
 }

@@ -4,23 +4,59 @@ import { Loader } from "@googlemaps/js-api-loader";
 import { STREET_VIEW } from "@/lib/config";
 import type { LatLng, StreetViewLink } from "@/lib/types";
 
+/** Shortest signed delta from `from` to `to` in degrees (−180…180). */
+function shortestAngleDelta(from: number, to: number): number {
+  let d = to - from;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+
+/** Smooth 0…1 easing — soft accel/decel (smoother than plain ease-in-out quad). */
+function easeInOutQuint(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
+}
+
 export type StreetViewStartOptions = {
   pano: string;
   heading: number;
   pitch: number;
 };
 
+export type StreetViewControllerOptions = {
+  onSuccessfulStep?: () => void;
+  /** Called when panorama imagery fails (e.g. black / no coverage). */
+  onImageryFault?: () => void;
+};
+
 export class StreetViewController {
   private panorama: google.maps.StreetViewPanorama | null = null;
+  /** Navigation / walk direction (deg). POV may add a wander-only sway on top. */
   private currentHeading = 0;
   private isMoving = false;
   private moveInterval: number | null = null;
+  private options: StreetViewControllerOptions = {};
+  private faultDebounce: number | null = null;
+  private hasSeenOkStatus = false;
+  /** Bumps to cancel in-flight heading animations (pans + step blends). */
+  private headingMotionGeneration = 0;
+  /** True while `runHeadingMotion` drives POV (pans / step blends); wander float is paused. */
+  private headingMotionInProgress = false;
+  /** Extra yaw/pitch applied only while walking + float enabled (not used for link picking). */
+  private wanderLookOffsetDeg = 0;
+  private wanderPitchOffsetDeg = 0;
+  private wanderFloatPhase = Math.random() * Math.PI * 2;
+  private wanderFloatRafId: number | null = null;
+  private wanderFloatLoopRunning = false;
 
   async init(
     container: HTMLElement,
     startCoords: LatLng,
-    streetViewStart?: StreetViewStartOptions,
+    streetViewStart: StreetViewStartOptions | undefined,
+    options: StreetViewControllerOptions,
   ): Promise<void> {
+    this.options = options;
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
     if (!apiKey) {
@@ -33,6 +69,8 @@ export class StreetViewController {
     });
 
     await loader.importLibrary("streetView");
+
+    this.wanderFloatPhase = Math.random() * Math.PI * 2;
 
     if (streetViewStart) {
       this.currentHeading = streetViewStart.heading;
@@ -70,6 +108,30 @@ export class StreetViewController {
       scrollwheel: false,
       disableDoubleClickZoom: true,
     });
+
+    this.panorama.addListener("status_changed", () => {
+      this.scheduleFaultCheck();
+    });
+    this.panorama.addListener("pano_changed", () => {
+      this.scheduleFaultCheck();
+    });
+  }
+
+  private scheduleFaultCheck(): void {
+    if (this.faultDebounce !== null) {
+      window.clearTimeout(this.faultDebounce);
+    }
+    this.faultDebounce = window.setTimeout(() => {
+      this.faultDebounce = null;
+      const status = this.panorama?.getStatus?.();
+      if (status === undefined) return;
+      if (status === "OK") {
+        this.hasSeenOkStatus = true;
+        return;
+      }
+      if (!this.hasSeenOkStatus) return;
+      this.options.onImageryFault?.();
+    }, 400);
   }
 
   getCoords(): LatLng {
@@ -80,6 +142,74 @@ export class StreetViewController {
 
   getHeading(): number {
     return this.currentHeading;
+  }
+
+  /** POV without wander sway — used during scripted pans. */
+  private applyNavPovOnly(): void {
+    if (!this.panorama) return;
+    this.panorama.setPov({
+      heading: (this.currentHeading + 360) % 360,
+      pitch: STREET_VIEW.PITCH,
+    });
+  }
+
+  /** POV with optional wander float (only when walking and not in a heading animation). */
+  private applyWanderPovWithFloat(): void {
+    if (!this.panorama) return;
+    if (!STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED) {
+      this.applyNavPovOnly();
+      return;
+    }
+    const h = (this.currentHeading + this.wanderLookOffsetDeg + 360) % 360;
+    const p = STREET_VIEW.PITCH + this.wanderPitchOffsetDeg;
+    this.panorama.setPov({ heading: h, pitch: p });
+  }
+
+  private ensureWanderFloatLoop(): void {
+    if (!STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED) return;
+    if (this.wanderFloatLoopRunning) return;
+    this.wanderFloatLoopRunning = true;
+
+    const loop = (): void => {
+      this.wanderFloatRafId = null;
+
+      if (!this.isMoving || !this.panorama) {
+        this.wanderFloatLoopRunning = false;
+        return;
+      }
+
+      if (!this.headingMotionInProgress) {
+        const t = performance.now() * 0.001;
+        const k = STREET_VIEW.WANDER_LOOK_DRIFT;
+        const phase = this.wanderFloatPhase;
+        const sway = STREET_VIEW.WANDER_LOOK_SWAY_DEG;
+        const psway = STREET_VIEW.WANDER_LOOK_PITCH_SWAY_DEG;
+
+        this.wanderLookOffsetDeg =
+          sway *
+          (0.52 * Math.sin(t * k * 1.0 + phase) +
+            0.33 * Math.sin(t * k * 0.67 + phase * 1.7) +
+            0.15 * Math.sin(t * k * 2.05 + phase * 0.4));
+
+        this.wanderPitchOffsetDeg = psway * Math.sin(t * k * 0.55 + phase * 0.35);
+
+        this.applyWanderPovWithFloat();
+      }
+
+      this.wanderFloatRafId = window.requestAnimationFrame(loop);
+    };
+
+    this.wanderFloatRafId = window.requestAnimationFrame(loop);
+  }
+
+  private stopWanderFloatLoop(): void {
+    if (this.wanderFloatRafId !== null) {
+      window.cancelAnimationFrame(this.wanderFloatRafId);
+      this.wanderFloatRafId = null;
+    }
+    this.wanderFloatLoopRunning = false;
+    this.wanderLookOffsetDeg = 0;
+    this.wanderPitchOffsetDeg = 0;
   }
 
   getLinks(): StreetViewLink[] {
@@ -114,47 +244,87 @@ export class StreetViewController {
       }
     }
 
+    this.cancelHeadingMotion();
     this.panorama.setPano(bestLink.pano);
-    this.currentHeading = bestLink.heading;
-    this.panorama.setPov({
-      heading: this.currentHeading,
-      pitch: STREET_VIEW.PITCH,
-    });
 
+    const pov = this.panorama.getPov();
+    const fromHeading = pov.heading ?? this.currentHeading;
+    const targetHeading = bestLink.heading;
+
+    void this.runHeadingMotion(
+      fromHeading,
+      targetHeading,
+      STREET_VIEW.STEP_HEADING_BLEND_MS,
+      easeInOutQuint,
+      () => {
+        this.options.onSuccessfulStep?.();
+      },
+    );
     return true;
   }
 
-  panToHeading(targetHeading: number, durationMs: number): Promise<void> {
+  private cancelHeadingMotion(): void {
+    this.headingMotionGeneration += 1;
+  }
+
+  /**
+   * Smoothly rotates POV from `fromHeading` to `targetHeading` (shortest arc).
+   * Calls `onSettled` when the motion finishes (including instant zero-duration).
+   */
+  private runHeadingMotion(
+    fromHeading: number,
+    targetHeading: number,
+    durationMs: number,
+    ease: (t: number) => number,
+    onSettled?: () => void,
+  ): Promise<void> {
     return new Promise((resolve) => {
       if (!this.panorama) {
+        onSettled?.();
         resolve();
         return;
       }
 
-      const startHeading = this.currentHeading;
-      let delta = targetHeading - startHeading;
-      if (delta > 180) delta -= 360;
-      if (delta < -180) delta += 360;
+      this.headingMotionInProgress = true;
+      const gen = this.headingMotionGeneration;
+      const delta = shortestAngleDelta(fromHeading, targetHeading);
+
+      if (durationMs <= 0 || Math.abs(delta) < 0.05) {
+        this.currentHeading = (targetHeading + 360) % 360;
+        this.applyNavPovOnly();
+        this.headingMotionInProgress = false;
+        onSettled?.();
+        resolve();
+        return;
+      }
+
       const startTime = performance.now();
 
       const animate = () => {
+        if (gen !== this.headingMotionGeneration) {
+          this.headingMotionInProgress = false;
+          resolve();
+          return;
+        }
+        if (!this.panorama) {
+          this.headingMotionInProgress = false;
+          resolve();
+          return;
+        }
+
         const elapsed = performance.now() - startTime;
-        const progress = Math.min(1, elapsed / durationMs);
-        const eased =
-          progress < 0.5
-            ? 2 * progress * progress
-            : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        const linearT = Math.min(1, elapsed / durationMs);
+        const easedT = ease(linearT);
+        this.currentHeading = (fromHeading + delta * easedT + 360) % 360;
+        this.applyNavPovOnly();
 
-        this.currentHeading = (startHeading + delta * eased + 360) % 360;
-        this.panorama?.setPov({
-          heading: this.currentHeading,
-          pitch: STREET_VIEW.PITCH,
-        });
-
-        if (progress < 1) {
+        if (linearT < 1) {
           requestAnimationFrame(animate);
         } else {
           this.currentHeading = (targetHeading + 360) % 360;
+          this.applyNavPovOnly();
+          this.headingMotionInProgress = false;
+          onSettled?.();
           resolve();
         }
       };
@@ -163,14 +333,25 @@ export class StreetViewController {
     });
   }
 
+  panToHeading(targetHeading: number, durationMs: number): Promise<void> {
+    if (!this.panorama) {
+      return Promise.resolve();
+    }
+
+    this.cancelHeadingMotion();
+    const fromHeading = this.currentHeading;
+
+    return this.runHeadingMotion(fromHeading, targetHeading, durationMs, easeInOutQuint);
+  }
+
   teleportTo(coords: LatLng): void {
     if (!this.panorama) return;
+    this.stopWanderFloatLoop();
+    this.cancelHeadingMotion();
+    this.hasSeenOkStatus = false;
     this.panorama.setPosition(coords);
     this.currentHeading = Math.random() * 360;
-    this.panorama.setPov({
-      heading: this.currentHeading,
-      pitch: STREET_VIEW.PITCH,
-    });
+    this.applyNavPovOnly();
   }
 
   startWalking(intervalMs: number): void {
@@ -179,6 +360,7 @@ export class StreetViewController {
     this.moveInterval = window.setInterval(() => {
       this.stepForward();
     }, intervalMs);
+    this.ensureWanderFloatLoop();
   }
 
   stopWalking(): void {
@@ -187,6 +369,8 @@ export class StreetViewController {
       window.clearInterval(this.moveInterval);
       this.moveInterval = null;
     }
+    this.stopWanderFloatLoop();
+    this.applyNavPovOnly();
   }
 
   getContainer(): HTMLElement | null {
@@ -197,7 +381,13 @@ export class StreetViewController {
   }
 
   destroy(): void {
+    this.stopWanderFloatLoop();
+    this.cancelHeadingMotion();
     this.stopWalking();
+    if (this.faultDebounce !== null) {
+      window.clearTimeout(this.faultDebounce);
+      this.faultDebounce = null;
+    }
     this.panorama = null;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_START, DEFAULT_STREET_VIEW_START, TIMING } from "@/lib/config";
+import { DEFAULT_START, TIMING } from "@/lib/config";
 import {
   BotState,
   stateToMode,
@@ -10,8 +10,8 @@ import {
   type ReviewLogEntry,
 } from "@/lib/types";
 import {
+  canTriggerNextReview,
   createInitialContext,
-  isInCooldown,
   transition,
   type Effect,
 } from "./state-machine";
@@ -62,8 +62,15 @@ export class Bot {
     await waitForVoices();
     await this.audio.init();
     await this.audio.resume();
-    await this.streetView.init(container, DEFAULT_START, DEFAULT_STREET_VIEW_START);
-    this.teleportManager.resetStuckDetection(DEFAULT_START);
+
+    const spawn = this.teleportManager.getRandomSpawnCoords();
+    this.context = createInitialContext(spawn);
+
+    await this.streetView.init(container, spawn, undefined, {
+      onSuccessfulStep: () => this.onWanderStep(),
+      onImageryFault: () => this.onImageryFault(),
+    });
+    this.teleportManager.resetStuckDetection(spawn);
 
     await this.logAction("createSession", { sessionId: this.sessionId });
 
@@ -102,15 +109,25 @@ export class Bot {
     const result = transition(this.context, event);
     if (!result) return;
 
+    let wanderSnapshot: number | undefined;
+    if (event.type === "BUSINESS_DETECTED" && this.context.state === BotState.WANDER) {
+      wanderSnapshot = this.streetView.getHeading();
+    }
+
     const nextContext: BotContext = {
       ...this.context,
       state: result.newState,
       mode: stateToMode(result.newState),
     };
 
+    if (wanderSnapshot !== undefined) {
+      nextContext.wanderHeadingBeforeReview = wanderSnapshot;
+    }
+
     if (result.newState === BotState.WANDER) {
       nextContext.targetBusiness = null;
       nextContext.reviewToRead = null;
+      nextContext.wanderHeadingBeforeReview = null;
     }
 
     this.context = nextContext;
@@ -147,9 +164,17 @@ export class Bot {
       case "PAN_TO_BUSINESS":
         void this.streetView.panToHeading(
           effect.bearingDeg,
-          TIMING.INSPECT_PAN_DURATION,
+          TIMING.ALIGN_PAN_MS,
         );
         break;
+
+      case "PAN_TO_WANDER_HEADING": {
+        const back = this.context.wanderHeadingBeforeReview;
+        if (back !== null) {
+          void this.streetView.panToHeading(back, TIMING.RETURN_PAN_DURATION);
+        }
+        break;
+      }
 
       case "START_TTS":
         void this.handleTts(effect.text);
@@ -184,9 +209,7 @@ export class Bot {
         break;
 
       case "TAKE_SCREENSHOT":
-        window.setTimeout(() => {
-          void this.takeScreenshot();
-        }, TIMING.INSPECT_PAN_DURATION);
+        void this.takeScreenshot();
         break;
 
       case "LOG_REVIEW":
@@ -198,12 +221,8 @@ export class Bot {
           ...this.context,
           sessionReviewCount: this.context.sessionReviewCount + 1,
           lastReviewTime: Date.now(),
+          stepsSinceLastReview: 0,
         };
-        this.teleportManager.recordReview();
-        break;
-
-      case "START_LINGER_ZOOM":
-      case "RESET_ZOOM":
         break;
     }
   }
@@ -237,10 +256,23 @@ export class Bot {
     }, TIMING.STATS_UPDATE_INTERVAL);
   }
 
+  private onWanderStep(): void {
+    if (!this.running || this.context.state !== BotState.WANDER) return;
+    this.context = {
+      ...this.context,
+      stepsSinceLastReview: this.context.stepsSinceLastReview + 1,
+    };
+  }
+
+  private onImageryFault(): void {
+    if (!this.running || this.teleporting) return;
+    this.dispatch({ type: "TELEPORT_TRIGGERED" });
+  }
+
   private async checkForBusiness(): Promise<void> {
     if (!this.running) return;
     if (this.context.state !== BotState.WANDER) return;
-    if (isInCooldown(this.context)) return;
+    if (!canTriggerNextReview(this.context)) return;
 
     const coords = this.streetView.getCoords();
     this.context = { ...this.context, currentCoords: coords };
@@ -294,9 +326,11 @@ export class Bot {
     this.notifyStateChange();
     await this.sleep(TIMING.TELEPORT_FADE_OUT);
 
-    this.context = { ...this.context, teleportPhase: "black" };
+    this.context = { ...this.context, teleportPhase: "warp" };
     this.notifyStateChange();
-    await this.sleep(TIMING.TELEPORT_HOLD_BLACK);
+    if (TIMING.TELEPORT_HOLD_DIM > 0) {
+      await this.sleep(TIMING.TELEPORT_HOLD_DIM);
+    }
 
     const destination = this.teleportManager.selectDestination(
       this.context.currentCoords,

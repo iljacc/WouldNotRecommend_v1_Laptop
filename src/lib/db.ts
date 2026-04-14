@@ -147,7 +147,7 @@ export function getStats(): SessionStats {
     "SELECT COALESCE(SUM(locations_scanned), 0) as total FROM sessions",
   );
   const reviews = one<{ total: number }>(
-    "SELECT COALESCE(SUM(reviews_read), 0) as total FROM sessions",
+    "SELECT COUNT(*) as total FROM review_log",
   );
   const screenshots = one<{ total: number }>(
     "SELECT COALESCE(SUM(screenshots_taken), 0) as total FROM sessions",

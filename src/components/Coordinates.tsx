@@ -1,6 +1,7 @@
 "use client";
 
 import type { LatLng } from "@/lib/types";
+import { HudChip } from "./HudChip";
 
 interface Props {
   coords: LatLng;
@@ -13,8 +14,10 @@ export function Coordinates({ coords }: Props) {
   const lng = Math.abs(coords.lng).toFixed(4);
 
   return (
-    <span className="text-xs text-white/60 tabular-nums">
-      {lat}&deg; {latDir}, {lng}&deg; {lngDir}
-    </span>
+    <HudChip>
+      <span className="text-xs text-white/60 tabular-nums">
+        {lat}&deg; {latDir}, {lng}&deg; {lngDir}
+      </span>
+    </HudChip>
   );
 }

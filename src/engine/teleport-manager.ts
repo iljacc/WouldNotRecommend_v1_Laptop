@@ -11,41 +11,29 @@ interface TeleportDestination {
 
 export class TeleportManager {
   private readonly destinationsList: TeleportDestination[] = destinations;
-  private visitedDestinations = new Set<number>();
   private stuckCheckCoords: LatLng | null = null;
   private stuckCheckTimestamp = 0;
-  private lastReviewTimestamp = 0;
-  private readonly startedTimestamp = Date.now();
 
+  /** Random commercial spawn in Den Haag (Street View resolves nearest pano). */
+  getRandomSpawnCoords(): LatLng {
+    const pick =
+      this.destinationsList[Math.floor(Math.random() * this.destinationsList.length)];
+    return { lat: pick.lat, lng: pick.lng };
+  }
+
+  /** Pick a random destination (uniform), avoiding immediate repeats when possible. */
   selectDestination(currentCoords: LatLng): LatLng {
-    let candidates = this.destinationsList
-      .map((destination, index) => ({ destination, index }))
-      .filter(({ index }) => !this.visitedDestinations.has(index));
-
-    if (candidates.length === 0) {
-      this.visitedDestinations.clear();
-      candidates = this.destinationsList.map((destination, index) => ({
-        destination,
-        index,
-      }));
+    let pool = [...this.destinationsList];
+    if (pool.length > 1) {
+      pool = pool.filter(
+        (d) => haversineDistance(currentCoords, d) > 25,
+      );
+      if (pool.length === 0) {
+        pool = [...this.destinationsList];
+      }
     }
-
-    const farthest = candidates
-      .map(({ destination, index }) => ({
-        destination,
-        index,
-        distance: haversineDistance(currentCoords, destination),
-      }))
-      .sort((a, b) => b.distance - a.distance)
-      .slice(0, Math.min(5, candidates.length));
-
-    const selected = farthest[Math.floor(Math.random() * farthest.length)];
-    this.visitedDestinations.add(selected.index);
-
-    return {
-      lat: selected.destination.lat,
-      lng: selected.destination.lng,
-    };
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    return { lat: pick.lat, lng: pick.lng };
   }
 
   updateStuckCheck(currentCoords: LatLng): void {
@@ -78,25 +66,7 @@ export class TeleportManager {
       }
     }
 
-    if (
-      this.lastReviewTimestamp > 0 &&
-      now - this.lastReviewTimestamp > TIMING.NO_REVIEW_TELEPORT_THRESHOLD
-    ) {
-      return true;
-    }
-
-    if (
-      this.lastReviewTimestamp === 0 &&
-      now - this.startedTimestamp > TIMING.NO_REVIEW_TELEPORT_THRESHOLD
-    ) {
-      return true;
-    }
-
     return false;
-  }
-
-  recordReview(): void {
-    this.lastReviewTimestamp = Date.now();
   }
 
   resetStuckDetection(coords: LatLng): void {

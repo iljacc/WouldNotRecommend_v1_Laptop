@@ -1,16 +1,14 @@
 export enum BotState {
   WANDER = "WANDER",
   DETECT = "DETECT",
-  APPROACH = "APPROACH",
-  INSPECT = "INSPECT",
   DELIVER = "DELIVER",
-  LINGER = "LINGER",
-  DEPART = "DEPART",
+  RETURN = "RETURN",
   TELEPORT = "TELEPORT",
 }
 
 export type BotMode = "Searching" | "Processing";
-export type TeleportPhase = "none" | "fade-out" | "black" | "fade-in";
+/** No solid black frame — only brief dim during reposition. */
+export type TeleportPhase = "none" | "fade-out" | "warp" | "fade-in";
 
 export function stateToMode(state: BotState): BotMode {
   switch (state) {
@@ -25,11 +23,8 @@ export function stateToMode(state: BotState): BotMode {
 export type BotEvent =
   | { type: "BUSINESS_DETECTED"; business: DetectedBusiness }
   | { type: "DETECT_COMPLETE" }
-  | { type: "APPROACH_COMPLETE" }
-  | { type: "INSPECT_COMPLETE" }
   | { type: "DELIVER_COMPLETE" }
-  | { type: "LINGER_COMPLETE" }
-  | { type: "DEPART_COMPLETE" }
+  | { type: "RETURN_COMPLETE" }
   | { type: "TELEPORT_TRIGGERED" }
   | { type: "TELEPORT_COMPLETE" }
   | { type: "STUCK_DETECTED" };
@@ -44,11 +39,16 @@ export interface BotContext {
   reviewToRead: Review | null;
   sessionReviewCount: number;
   sessionStartTime: number;
+  /** Legacy field kept for logging; cooldown is step-based (`stepsSinceLastReview`). */
   lastReviewTime: number;
   lastQueryCoords: LatLng | null;
   readReviewHashes: Set<string>;
   stuckCheckTimestamp: number;
   stuckCheckCoords: LatLng | null;
+  /** Heading (deg) along the road before panning toward a business. */
+  wanderHeadingBeforeReview: number | null;
+  /** Successful Street View steps since last completed review; used for cooldown. */
+  stepsSinceLastReview: number;
 }
 
 export interface LatLng {

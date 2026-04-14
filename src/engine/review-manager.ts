@@ -1,4 +1,4 @@
-import { PLACES, REVIEWS } from "@/lib/config";
+import { isLatLngInHagueRegion, PLACES, REVIEWS } from "@/lib/config";
 import type { DetectedBusiness, LatLng, Review } from "@/lib/types";
 
 type ApiPlace = {
@@ -99,14 +99,16 @@ export class ReviewManager {
       const response = await fetch(`/api/places?${params.toString()}`);
       const data = (await response.json()) as { places?: ApiPlace[] };
 
-      this.cachedBusinesses = (data.places || []).map((place) => ({
-        placeId: place.placeId,
-        name: place.name,
-        location: place.location,
-        types: place.types,
-        bearing: bearing(currentCoords, place.location),
-        distance: haversineDistance(currentCoords, place.location),
-      }));
+      this.cachedBusinesses = (data.places || [])
+        .map((place) => ({
+          placeId: place.placeId,
+          name: place.name,
+          location: place.location,
+          types: place.types,
+          bearing: bearing(currentCoords, place.location),
+          distance: haversineDistance(currentCoords, place.location),
+        }))
+        .filter((b) => isLatLngInHagueRegion(b.location));
 
       return this.cachedBusinesses;
     } catch (error) {
@@ -116,6 +118,9 @@ export class ReviewManager {
   }
 
   findNearestBusiness(currentCoords: LatLng): DetectedBusiness | null {
+    if (!isLatLngInHagueRegion(currentCoords)) {
+      return null;
+    }
     const updated = this.cachedBusinesses
       .filter((business) => !this.exhaustedPlaceIds.has(business.placeId))
       .map((business) => ({

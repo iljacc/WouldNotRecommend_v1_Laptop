@@ -7,5 +7,11 @@ interface Props {
 }
 
 export function ModeIndicator({ mode }: Props) {
-  return <span className="text-xs text-white/60">{mode}</span>;
+  const color =
+    mode === "Searching" ? "text-yellow-400" : "text-green-400";
+  return (
+    <span className={`text-3xl font-medium tabular-nums leading-none ${color}`}>
+      {mode}
+    </span>
+  );
 }

@@ -12,7 +12,8 @@ import { useBot } from "@/hooks/useBot";
 const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 
 export default function Home() {
-  const { containerRef, uiState, isStarted, error, startBot } = useBot();
+  const { containerRef, uiState, lifetimeReviewsTotal, isStarted, error, startBot } =
+    useBot();
 
   useEffect(() => {
     if (!KIOSK_MODE || isStarted) return;
@@ -38,6 +39,7 @@ export default function Home() {
         coords={uiState.coords}
         city={uiState.city}
         reviewCount={uiState.reviewCount}
+        lifetimeReviewsTotal={lifetimeReviewsTotal}
         sessionStartTime={uiState.sessionStartTime}
       />
 
