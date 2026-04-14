@@ -1,4 +1,8 @@
-import { isLatLngInHagueRegion, PLACES, REVIEWS } from "@/lib/config";
+import {
+  getBotSettings,
+  isLatLngInWanderRegion,
+  type ReviewSelectionMode,
+} from "@/lib/bot-settings";
 import type { DetectedBusiness, LatLng, Review } from "@/lib/types";
 
 type ApiPlace = {
@@ -49,10 +53,11 @@ export function hashReview(text: string): string {
 }
 
 export function filterReviews(reviews: Review[], readHashes: Set<string>): Review[] {
+  const { reviews: revCfg } = getBotSettings();
   return reviews.filter((review) => {
-    if (review.rating !== REVIEWS.TARGET_RATING) return false;
-    if (review.text.length < REVIEWS.MIN_LENGTH) return false;
-    if (review.text.length > REVIEWS.MAX_LENGTH) return false;
+    if (review.rating !== revCfg.targetRating) return false;
+    if (review.text.length < revCfg.minLength) return false;
+    if (review.text.length > revCfg.maxLength) return false;
     if (readHashes.has(review.hash)) return false;
 
     const latinChars = review.text.replace(/[^a-zA-Z]/g, "").length;
@@ -63,9 +68,20 @@ export function filterReviews(reviews: Review[], readHashes: Set<string>): Revie
   });
 }
 
-export function selectReview(reviews: Review[]): Review | null {
+export function selectReview(
+  reviews: Review[],
+  mode: ReviewSelectionMode,
+): Review | null {
   if (reviews.length === 0) return null;
-  return reviews[Math.floor(Math.random() * reviews.length)];
+  switch (mode) {
+    case "shortest":
+      return [...reviews].sort((a, b) => a.text.length - b.text.length)[0];
+    case "longest":
+      return [...reviews].sort((a, b) => b.text.length - a.text.length)[0];
+    case "random":
+    default:
+      return reviews[Math.floor(Math.random() * reviews.length)];
+  }
 }
 
 export class ReviewManager {
@@ -76,17 +92,27 @@ export class ReviewManager {
 
   constructor(private readonly readHashes: Set<string>) {}
 
+  /** Clear place/query caches (e.g. after soft-reset). Does not clear read hashes. */
+  clearSessionCaches(): void {
+    this.exhaustedPlaceIds.clear();
+    this.cachedBusinesses = [];
+    this.lastQueryCoords = null;
+    this.lastQueryTime = 0;
+  }
+
   shouldQuery(currentCoords: LatLng): boolean {
+    const places = getBotSettings().places;
     const now = Date.now();
-    if (now - this.lastQueryTime < PLACES.QUERY_MIN_INTERVAL) return false;
+    if (now - this.lastQueryTime < places.queryMinInterval) return false;
     if (!this.lastQueryCoords) return true;
     return (
       haversineDistance(this.lastQueryCoords, currentCoords) >=
-      PLACES.QUERY_DISTANCE_THRESHOLD
+      places.queryDistanceThreshold
     );
   }
 
   async fetchNearbyBusinesses(currentCoords: LatLng): Promise<DetectedBusiness[]> {
+    const { wanderRegion, places } = getBotSettings();
     this.lastQueryCoords = { ...currentCoords };
     this.lastQueryTime = Date.now();
 
@@ -94,7 +120,7 @@ export class ReviewManager {
       const params = new URLSearchParams({
         lat: String(currentCoords.lat),
         lng: String(currentCoords.lng),
-        radius: String(PLACES.SEARCH_RADIUS),
+        radius: String(places.searchRadius),
       });
       const response = await fetch(`/api/places?${params.toString()}`);
       const data = (await response.json()) as { places?: ApiPlace[] };
@@ -108,7 +134,7 @@ export class ReviewManager {
           bearing: bearing(currentCoords, place.location),
           distance: haversineDistance(currentCoords, place.location),
         }))
-        .filter((b) => isLatLngInHagueRegion(b.location));
+        .filter((b) => isLatLngInWanderRegion(b.location, wanderRegion));
 
       return this.cachedBusinesses;
     } catch (error) {
@@ -118,7 +144,8 @@ export class ReviewManager {
   }
 
   findNearestBusiness(currentCoords: LatLng): DetectedBusiness | null {
-    if (!isLatLngInHagueRegion(currentCoords)) {
+    const { wanderRegion, places } = getBotSettings();
+    if (!isLatLngInWanderRegion(currentCoords, wanderRegion)) {
       return null;
     }
     const updated = this.cachedBusinesses
@@ -128,7 +155,7 @@ export class ReviewManager {
         bearing: bearing(currentCoords, business.location),
         distance: haversineDistance(currentCoords, business.location),
       }))
-      .filter((business) => business.distance <= PLACES.DETECTION_RADIUS)
+      .filter((business) => business.distance <= places.detectionRadius)
       .sort((a, b) => a.distance - b.distance);
 
     return updated[0] || null;
@@ -153,7 +180,8 @@ export class ReviewManager {
         hash: hashReview(review.text),
       }));
       const filtered = filterReviews(reviews, this.readHashes);
-      const selected = selectReview(filtered);
+      const mode = getBotSettings().reviewSelectionMode;
+      const selected = selectReview(filtered, mode);
 
       if (selected) {
         this.readHashes.add(selected.hash);

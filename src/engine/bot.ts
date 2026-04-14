@@ -1,6 +1,12 @@
 "use client";
 
-import { DEFAULT_START, TIMING } from "@/lib/config";
+import { postActivity } from "@/lib/bot-activity";
+import {
+  getBotSettings,
+  reloadBotSettingsFromStorage,
+  subscribeBotSettings,
+} from "@/lib/bot-settings";
+import { DEFAULT_START } from "@/lib/config";
 import {
   BotState,
   stateToMode,
@@ -20,7 +26,6 @@ import { haversineDistance, ReviewManager } from "./review-manager";
 import { StreetViewController } from "./street-view-controller";
 import { TeleportManager } from "./teleport-manager";
 import { WebSpeechTTS, waitForVoices } from "./tts-engine";
-
 export type BotStateCallback = (context: BotContext) => void;
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -52,6 +57,9 @@ export class Bot {
   private teleports = 0;
   private lastScreenshotFilename = "";
   private ttsStartedAt = 0;
+  /** Avoid duplicate STATE lines; WANDER is not logged here (use SEARCHING per step). */
+  private lastActivityBroadcastState: BotState | null = null;
+  private unsubscribeSettings: (() => void) | null = null;
 
   async start(
     container: HTMLElement,
@@ -74,10 +82,20 @@ export class Bot {
 
     await this.logAction("createSession", { sessionId: this.sessionId });
 
+    postActivity("SESSION", [
+      `sessionId=${this.sessionId}`,
+      `spawn lat=${spawn.lat.toFixed(6)} lng=${spawn.lng.toFixed(6)}`,
+    ]);
+
     this.running = true;
+    reloadBotSettingsFromStorage();
     this.audio.startAmbient();
-    this.streetView.startWalking(TIMING.WANDER_STEP_INTERVAL);
+    this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
     this.startPeriodicChecks();
+    this.unsubscribeSettings = subscribeBotSettings(
+      () => this.applySettingsHotReload(),
+      () => this.applySoftReset(),
+    );
     this.updateCity();
     this.notifyStateChange();
   }
@@ -88,6 +106,8 @@ export class Bot {
 
   destroy(): void {
     this.running = false;
+    this.unsubscribeSettings?.();
+    this.unsubscribeSettings = null;
     this.tts.stop();
     this.audio.destroy();
     this.streetView.destroy();
@@ -106,6 +126,7 @@ export class Bot {
   private dispatch(event: BotEvent): void {
     if (!this.running && event.type !== "TELEPORT_COMPLETE") return;
 
+    const prevState = this.context.state;
     const result = transition(this.context, event);
     if (!result) return;
 
@@ -145,33 +166,88 @@ export class Bot {
     }
 
     for (const effect of result.effects) {
-      this.executeEffect(effect);
+      this.executeEffect(effect, event, prevState);
     }
 
     this.notifyStateChange();
   }
 
-  private executeEffect(effect: Effect): void {
+  private stopWalkingReason(event: BotEvent, prevState: BotState): string {
+    switch (event.type) {
+      case "BUSINESS_DETECTED":
+        return "stop walking — business detected, aligning for review";
+      case "STUCK_DETECTED":
+        return "stop walking — stuck, teleporting";
+      case "TELEPORT_TRIGGERED":
+        if (prevState === BotState.WANDER) {
+          return "stop walking — imagery fault or blocked path, teleporting";
+        }
+        return `stop walking — teleport during ${prevState}`;
+      default:
+        return `stop walking (${event.type})`;
+    }
+  }
+
+  private startWalkingReason(event: BotEvent): string {
+    switch (event.type) {
+      case "RETURN_COMPLETE":
+        return "start walking — returned to wander heading";
+      case "TELEPORT_COMPLETE":
+        return "start walking — after teleport";
+      default:
+        return `start walking (${event.type})`;
+    }
+  }
+
+  private teleportCause(event: BotEvent, prevState: BotState): string {
+    switch (event.type) {
+      case "STUCK_DETECTED":
+        return "stuck_threshold";
+      case "TELEPORT_TRIGGERED":
+        if (prevState === BotState.WANDER) return "imagery_fault_or_path";
+        if (prevState === BotState.DETECT) return "interrupt_during_detect";
+        if (prevState === BotState.DELIVER) return "interrupt_during_deliver";
+        if (prevState === BotState.RETURN) return "interrupt_during_return";
+        return `interrupt_from_${prevState}`;
+      default:
+        return event.type;
+    }
+  }
+
+  private executeEffect(
+    effect: Effect,
+    event: BotEvent,
+    prevState: BotState,
+  ): void {
     switch (effect.type) {
       case "START_WALKING":
-        this.streetView.startWalking(TIMING.WANDER_STEP_INTERVAL);
+        this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
+        postActivity("WALK", [
+          `${this.startWalkingReason(event)} | ${this.activityLocationFragment()}`,
+        ]);
         break;
 
       case "STOP_WALKING":
         this.streetView.stopWalking();
+        postActivity("STOP", [
+          `${this.stopWalkingReason(event, prevState)} | ${this.activityLocationFragment()}`,
+        ]);
         break;
 
       case "PAN_TO_BUSINESS":
         void this.streetView.panToHeading(
           effect.bearingDeg,
-          TIMING.ALIGN_PAN_MS,
+          getBotSettings().timing.alignPanMs,
         );
         break;
 
       case "PAN_TO_WANDER_HEADING": {
         const back = this.context.wanderHeadingBeforeReview;
         if (back !== null) {
-          void this.streetView.panToHeading(back, TIMING.RETURN_PAN_DURATION);
+          void this.streetView.panToHeading(
+            back,
+            getBotSettings().timing.returnPanDuration,
+          );
         }
         break;
       }
@@ -204,9 +280,15 @@ export class Bot {
         this.audio.unduckAmbient();
         break;
 
-      case "START_TELEPORT_FADE":
-        void this.handleTeleport();
+      case "START_TELEPORT_FADE": {
+        const fromCoords = { ...this.context.currentCoords };
+        const cause = this.teleportCause(event, prevState);
+        postActivity("TELEPORT", [
+          `fade-out | cause=${cause} | from_lat=${fromCoords.lat.toFixed(6)} from_lng=${fromCoords.lng.toFixed(6)}`,
+        ]);
+        void this.handleTeleport(fromCoords, cause);
         break;
+      }
 
       case "TAKE_SCREENSHOT":
         void this.takeScreenshot();
@@ -249,11 +331,44 @@ export class Bot {
         return;
       }
       this.teleportManager.updateStuckCheck(coords);
-    }, TIMING.STUCK_CHECK_INTERVAL);
+    }, getBotSettings().timing.stuckCheckInterval);
 
     this.statsInterval = setInterval(() => {
       void this.updateStats();
-    }, TIMING.STATS_UPDATE_INTERVAL);
+    }, getBotSettings().timing.statsUpdateInterval);
+  }
+
+  private restartStuckAndStatsIntervals(): void {
+    if (this.stuckCheckInterval) clearInterval(this.stuckCheckInterval);
+    if (this.statsInterval) clearInterval(this.statsInterval);
+    const timing = getBotSettings().timing;
+    this.stuckCheckInterval = setInterval(() => {
+      if (!this.running || this.context.state !== BotState.WANDER) return;
+      const coords = this.streetView.getCoords();
+      if (this.teleportManager.shouldTeleport(coords)) {
+        this.dispatch({ type: "STUCK_DETECTED" });
+        return;
+      }
+      this.teleportManager.updateStuckCheck(coords);
+    }, timing.stuckCheckInterval);
+    this.statsInterval = setInterval(() => {
+      void this.updateStats();
+    }, timing.statsUpdateInterval);
+  }
+
+  private applySettingsHotReload(): void {
+    if (!this.running) return;
+    this.restartStuckAndStatsIntervals();
+    if (this.context.state === BotState.WANDER) {
+      this.streetView.stopWalking();
+      this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
+    }
+  }
+
+  private applySoftReset(): void {
+    this.context.readReviewHashes.clear();
+    this.reviewManager.clearSessionCaches();
+    postActivity("SESSION", ["soft-reset — cleared review hash cache"]);
   }
 
   private onWanderStep(): void {
@@ -262,6 +377,10 @@ export class Bot {
       ...this.context,
       stepsSinceLastReview: this.context.stepsSinceLastReview + 1,
     };
+    const coords = this.streetView.getCoords();
+    postActivity("SEARCHING", [
+      `step ${this.activityLocationFragmentFrom(coords)}`,
+    ]);
   }
 
   private onImageryFault(): void {
@@ -302,6 +421,11 @@ export class Bot {
       reviewToRead: review,
     };
 
+    postActivity("REVIEW", [
+      `placeId=${targetBusiness.placeId} | business=${targetBusiness.name} | author=${review.authorName} | relativeTime=${review.relativeTimeDescription} | rating=${review.rating}`,
+      review.text,
+    ]);
+
     this.dispatch({ type: "BUSINESS_DETECTED", business: targetBusiness });
   }
 
@@ -317,24 +441,29 @@ export class Bot {
     }
   }
 
-  private async handleTeleport(): Promise<void> {
+  private async handleTeleport(fromCoords: LatLng, cause: string): Promise<void> {
     if (this.teleporting) return;
     this.teleporting = true;
 
+    const timing = getBotSettings().timing;
     this.context = { ...this.context, teleportPhase: "fade-out" };
-    this.audio.fadeToSilence(TIMING.TELEPORT_FADE_OUT);
+    this.audio.fadeToSilence(timing.teleportFadeOut);
     this.notifyStateChange();
-    await this.sleep(TIMING.TELEPORT_FADE_OUT);
+    await this.sleep(timing.teleportFadeOut);
 
     this.context = { ...this.context, teleportPhase: "warp" };
+    postActivity("TELEPORT", ["warp"]);
     this.notifyStateChange();
-    if (TIMING.TELEPORT_HOLD_DIM > 0) {
-      await this.sleep(TIMING.TELEPORT_HOLD_DIM);
+    if (timing.teleportHoldDim > 0) {
+      await this.sleep(timing.teleportHoldDim);
     }
 
     const destination = this.teleportManager.selectDestination(
       this.context.currentCoords,
     );
+    postActivity("TELEPORT", [
+      `jump | cause=${cause} | from_lat=${fromCoords.lat.toFixed(6)} from_lng=${fromCoords.lng.toFixed(6)} → to_lat=${destination.lat.toFixed(6)} to_lng=${destination.lng.toFixed(6)}`,
+    ]);
     this.streetView.teleportTo(destination);
     this.teleports += 1;
     this.lastStatsCoords = destination;
@@ -350,11 +479,13 @@ export class Bot {
     void this.updateCity();
 
     this.context = { ...this.context, teleportPhase: "fade-in" };
-    this.audio.fadeFromSilence(TIMING.TELEPORT_FADE_IN);
+    postActivity("TELEPORT", ["fade-in"]);
+    this.audio.fadeFromSilence(timing.teleportFadeIn);
     this.notifyStateChange();
-    await this.sleep(TIMING.TELEPORT_FADE_IN);
+    await this.sleep(timing.teleportFadeIn);
 
     this.context = { ...this.context, teleportPhase: "none" };
+    postActivity("TELEPORT", ["complete — resuming wander"]);
     this.teleporting = false;
     this.dispatch({ type: "TELEPORT_COMPLETE" });
   }
@@ -476,7 +607,39 @@ export class Bot {
   }
 
   private notifyStateChange(): void {
+    if (this.lastActivityBroadcastState !== this.context.state) {
+      this.lastActivityBroadcastState = this.context.state;
+      if (this.context.state !== BotState.WANDER) {
+        postActivity("STATE", [
+          `${this.activityStateLine(this.context.state)} | ${this.activityLocationFragment()}`,
+        ]);
+      }
+    }
     this.onStateChange?.({ ...this.context });
+  }
+
+  private activityStateLine(state: BotState): string {
+    switch (state) {
+      case BotState.DETECT:
+        return "DETECT";
+      case BotState.DELIVER:
+        return "DELIVER";
+      case BotState.RETURN:
+        return "RETURN";
+      case BotState.TELEPORT:
+        return "TELEPORT";
+      default:
+        return state;
+    }
+  }
+
+  /** Same lat/lng/city shape as SEARCHING step lines; uses current context coords. */
+  private activityLocationFragment(): string {
+    return this.activityLocationFragmentFrom(this.context.currentCoords);
+  }
+
+  private activityLocationFragmentFrom(coords: LatLng): string {
+    return `lat=${coords.lat.toFixed(6)} lng=${coords.lng.toFixed(6)} city=${this.context.currentCity}`;
   }
 
   private sleep(ms: number): Promise<void> {

@@ -91,8 +91,8 @@ npm install -D @types/better-sqlite3 @types/three
 
 Create `.env.example`:
 ```
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-GOOGLE_PLACES_API_KEY=your_google_places_api_key_here
+GEOCODING_API_KEY=your_geocoding_api_key_here
+PLACES_API_KEY=your_places_api_key_here
 ```
 
 Create `.env.local` with actual keys (this file is already in `.gitignore` from create-next-app).
@@ -830,7 +830,7 @@ git commit -m "feat: SQLite database layer — review log, sessions, statistics"
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
 
-const API_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+const API_KEY = process.env.PLACES_API_KEY || process.env.GEOCODING_API_KEY;
 
 export async function GET(request: NextRequest) {
   if (!API_KEY) {
@@ -964,7 +964,7 @@ export async function POST(request: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from "next/server";
 
-const API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const API_KEY = process.env.GEOCODING_API_KEY;
 
 export async function GET(request: NextRequest) {
   if (!API_KEY) {
@@ -2014,7 +2014,7 @@ export class StreetViewController {
    */
   async init(container: HTMLElement, startCoords: LatLng): Promise<void> {
     const loader = new Loader({
-      apiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
+      apiKey: process.env.NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY || "",
       version: "weekly",
     });
 
@@ -3531,18 +3531,18 @@ export default function Home() {
 }
 ```
 
-- [ ] **Step 3: Add `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` to `.env.local`**
+- [ ] **Step 3: Add `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` to `.env.local`**
 
 The Street View JS API needs the key on the client side:
 ```
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY=your_maps_javascript_api_key_here
 ```
 
 Also update `.env.example`:
 ```
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-GOOGLE_PLACES_API_KEY=your_google_places_api_key_here
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+GEOCODING_API_KEY=your_geocoding_api_key_here
+PLACES_API_KEY=your_places_api_key_here
+NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY=your_maps_javascript_api_key_here
 ```
 
 - [ ] **Step 4: Verify the app loads**

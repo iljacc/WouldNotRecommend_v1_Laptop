@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader } from "@googlemaps/js-api-loader";
-import { STREET_VIEW } from "@/lib/config";
+import { getBotSettings } from "@/lib/bot-settings";
 import type { LatLng, StreetViewLink } from "@/lib/types";
 
 /** Shortest signed delta from `from` to `to` in degrees (−180…180). */
@@ -57,10 +57,10 @@ export class StreetViewController {
     options: StreetViewControllerOptions,
   ): Promise<void> {
     this.options = options;
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const apiKey = process.env.NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY;
 
     if (!apiKey) {
-      throw new Error("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not configured.");
+      throw new Error("NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY is not configured.");
     }
 
     const loader = new Loader({
@@ -78,6 +78,9 @@ export class StreetViewController {
       this.currentHeading = Math.random() * 360;
     }
 
+    const pitch = streetViewStart
+      ? streetViewStart.pitch
+      : getBotSettings().streetView.pitch;
     const pov = streetViewStart
       ? {
           heading: streetViewStart.heading,
@@ -85,7 +88,7 @@ export class StreetViewController {
         }
       : {
           heading: this.currentHeading,
-          pitch: STREET_VIEW.PITCH,
+          pitch,
         };
 
     this.panorama = new google.maps.StreetViewPanorama(container, {
@@ -147,26 +150,28 @@ export class StreetViewController {
   /** POV without wander sway — used during scripted pans. */
   private applyNavPovOnly(): void {
     if (!this.panorama) return;
+    const pitch = getBotSettings().streetView.pitch;
     this.panorama.setPov({
       heading: (this.currentHeading + 360) % 360,
-      pitch: STREET_VIEW.PITCH,
+      pitch,
     });
   }
 
   /** POV with optional wander float (only when walking and not in a heading animation). */
   private applyWanderPovWithFloat(): void {
     if (!this.panorama) return;
-    if (!STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED) {
+    const sv = getBotSettings().streetView;
+    if (!sv.wanderLookFloatEnabled) {
       this.applyNavPovOnly();
       return;
     }
     const h = (this.currentHeading + this.wanderLookOffsetDeg + 360) % 360;
-    const p = STREET_VIEW.PITCH + this.wanderPitchOffsetDeg;
+    const p = sv.pitch + this.wanderPitchOffsetDeg;
     this.panorama.setPov({ heading: h, pitch: p });
   }
 
   private ensureWanderFloatLoop(): void {
-    if (!STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED) return;
+    if (!getBotSettings().streetView.wanderLookFloatEnabled) return;
     if (this.wanderFloatLoopRunning) return;
     this.wanderFloatLoopRunning = true;
 
@@ -179,11 +184,12 @@ export class StreetViewController {
       }
 
       if (!this.headingMotionInProgress) {
+        const sv = getBotSettings().streetView;
         const t = performance.now() * 0.001;
-        const k = STREET_VIEW.WANDER_LOOK_DRIFT;
+        const k = sv.wanderLookDrift;
         const phase = this.wanderFloatPhase;
-        const sway = STREET_VIEW.WANDER_LOOK_SWAY_DEG;
-        const psway = STREET_VIEW.WANDER_LOOK_PITCH_SWAY_DEG;
+        const sway = sv.wanderLookSwayDeg;
+        const psway = sv.wanderLookPitchSwayDeg;
 
         this.wanderLookOffsetDeg =
           sway *
@@ -231,16 +237,24 @@ export class StreetViewController {
     const links = this.getLinks();
     if (links.length === 0) return false;
 
+    const sv = getBotSettings().streetView;
+    const linkMode = getBotSettings().linkSelectionMode;
     let bestLink = links[0];
-    let bestDelta = Number.POSITIVE_INFINITY;
 
-    for (const link of links) {
-      let delta = Math.abs(link.heading - this.currentHeading);
-      if (delta > 180) delta = 360 - delta;
-      delta += (Math.random() - 0.5) * STREET_VIEW.WANDER_HEADING_WOBBLE;
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        bestLink = link;
+    if (linkMode === "random_link") {
+      bestLink = links[Math.floor(Math.random() * links.length)];
+    } else {
+      const wobble =
+        linkMode === "straight" ? 0 : sv.wanderHeadingWobble;
+      let bestDelta = Number.POSITIVE_INFINITY;
+      for (const link of links) {
+        let delta = Math.abs(link.heading - this.currentHeading);
+        if (delta > 180) delta = 360 - delta;
+        delta += (Math.random() - 0.5) * wobble;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestLink = link;
+        }
       }
     }
 
@@ -254,7 +268,7 @@ export class StreetViewController {
     void this.runHeadingMotion(
       fromHeading,
       targetHeading,
-      STREET_VIEW.STEP_HEADING_BLEND_MS,
+      sv.stepHeadingBlendMs,
       easeInOutQuint,
       () => {
         this.options.onSuccessfulStep?.();

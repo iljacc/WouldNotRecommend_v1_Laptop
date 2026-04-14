@@ -170,3 +170,40 @@ export function getStats(): SessionStats {
     totalTeleports: teleports.total,
   };
 }
+
+export type RecentReviewLogRow = {
+  id: number;
+  timestamp: string;
+  businessName: string;
+  city: string;
+  reviewRating: number;
+  reviewText: string;
+};
+
+export function getRecentReviewLogs(limit: number): RecentReviewLogRow[] {
+  const capped = Math.min(200, Math.max(1, Math.floor(limit)));
+  const rows = db()
+    .prepare(
+      `SELECT id, timestamp, business_name, city, review_rating, review_text
+       FROM review_log
+       ORDER BY id DESC
+       LIMIT ?`,
+    )
+    .all(capped) as {
+    id: number;
+    timestamp: string;
+    business_name: string;
+    city: string;
+    review_rating: number;
+    review_text: string;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    timestamp: r.timestamp,
+    businessName: r.business_name,
+    city: r.city,
+    reviewRating: r.review_rating,
+    reviewText: r.review_text,
+  }));
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const API_KEY =
-  process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+  process.env.PLACES_API_KEY || process.env.GEOCODING_API_KEY;
 
 type NearbyPlace = {
   place_id: string;

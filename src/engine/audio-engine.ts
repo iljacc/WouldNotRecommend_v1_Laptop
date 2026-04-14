@@ -1,6 +1,7 @@
 "use client";
 
-import { AUDIO, TIMING } from "@/lib/config";
+import { getBotSettings } from "@/lib/bot-settings";
+import { AUDIO } from "@/lib/config";
 import type { AmbientLayer } from "@/lib/types";
 
 type ToneDirection = "ascending" | "descending";
@@ -83,7 +84,7 @@ export class AudioEngine {
     if (this.activeLayer === layer) return;
 
     const now = this.ctx.currentTime;
-    const duration = TIMING.AUDIO_CROSSFADE / 1000;
+    const duration = getBotSettings().timing.audioCrossfade / 1000;
     const searching = layer === "A" ? AUDIO.AMBIENT_SEARCHING_VOLUME : 0;
     const processing = layer === "B" ? AUDIO.AMBIENT_PROCESSING_VOLUME : 0;
 

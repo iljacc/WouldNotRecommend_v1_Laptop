@@ -1,4 +1,4 @@
-import { PLACES, TIMING } from "@/lib/config";
+import { getBotSettings } from "@/lib/bot-settings";
 import {
   BotState,
   stateToMode,
@@ -34,6 +34,7 @@ export function transition(
   context: BotContext,
   event: BotEvent,
 ): StateTransition | null {
+  const timing = getBotSettings().timing;
   switch (context.state) {
     case BotState.WANDER:
       if (event.type === "BUSINESS_DETECTED") {
@@ -41,7 +42,7 @@ export function transition(
           newState: BotState.DETECT,
           scheduleTimer: {
             event: { type: "DETECT_COMPLETE" },
-            delayMs: TIMING.REVIEW_ALIGN_DURATION,
+            delayMs: timing.reviewAlignDuration,
           },
           effects: [
             { type: "STOP_WALKING" },
@@ -82,7 +83,7 @@ export function transition(
           newState: BotState.RETURN,
           scheduleTimer: {
             event: { type: "RETURN_COMPLETE" },
-            delayMs: TIMING.RETURN_STATE_TIMER_MS,
+            delayMs: timing.returnStateTimerMs,
           },
           effects: [{ type: "PAN_TO_WANDER_HEADING" }],
         };
@@ -101,7 +102,7 @@ export function transition(
           newState: BotState.RETURN,
           scheduleTimer: {
             event: { type: "RETURN_COMPLETE" },
-            delayMs: TIMING.RETURN_STATE_TIMER_MS,
+            delayMs: timing.returnStateTimerMs,
           },
           effects: [
             { type: "UNDUCK_AMBIENT" },
@@ -147,10 +148,14 @@ export function transition(
 }
 
 export function canTriggerNextReview(context: BotContext): boolean {
-  return context.stepsSinceLastReview >= PLACES.MIN_STEPS_BETWEEN_REVIEWS;
+  return (
+    context.stepsSinceLastReview >=
+    getBotSettings().places.minStepsBetweenReviews
+  );
 }
 
 export function createInitialContext(startCoords: LatLng): BotContext {
+  const minSteps = getBotSettings().places.minStepsBetweenReviews;
   return {
     state: BotState.WANDER,
     mode: stateToMode(BotState.WANDER),
@@ -167,6 +172,6 @@ export function createInitialContext(startCoords: LatLng): BotContext {
     stuckCheckTimestamp: Date.now(),
     stuckCheckCoords: startCoords,
     wanderHeadingBeforeReview: null,
-    stepsSinceLastReview: PLACES.MIN_STEPS_BETWEEN_REVIEWS,
+    stepsSinceLastReview: minSteps,
   };
 }
