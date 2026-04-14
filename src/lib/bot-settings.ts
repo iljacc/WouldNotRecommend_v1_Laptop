@@ -5,6 +5,7 @@ import {
   STREET_VIEW,
   TIMING,
 } from "@/lib/config";
+import { computeBBoxFromPath, isLatLngInPolygon } from "@/lib/wander-geo";
 import type { LatLng } from "@/lib/types";
 
 export type ReviewSelectionMode = "random" | "shortest" | "longest";
@@ -15,6 +16,19 @@ export interface WanderRegion {
   maxLat: number;
   minLng: number;
   maxLng: number;
+  /**
+   * When present with at least three vertices, containment tests use the polygon;
+   * otherwise the axis-aligned bounding box is used.
+   */
+  polygonPath?: LatLng[];
+}
+
+/** User-defined spawn coordinates (session start / teleports when used as pool). */
+export interface CustomSpawnPoint {
+  id: string;
+  lat: number;
+  lng: number;
+  label?: string;
 }
 
 /** Tunable subset of `TIMING` from config (all ms unless noted). */
@@ -65,6 +79,8 @@ export interface BotSettings {
   reviews: BotReviewsSettings;
   streetView: BotStreetViewSettings;
   wanderRegion: WanderRegion;
+  /** When non-empty, random spawns prefer these points (still filtered by wander region when possible). */
+  customSpawnPoints: CustomSpawnPoint[];
   reviewSelectionMode: ReviewSelectionMode;
   linkSelectionMode: LinkSelectionMode;
 }
@@ -141,6 +157,7 @@ export function createDefaultBotSettings(): BotSettings {
     reviews: defaultReviews(),
     streetView: defaultStreetView(),
     wanderRegion: defaultWanderRegion(),
+    customSpawnPoints: [],
     reviewSelectionMode: "random",
     linkSelectionMode: "forward_wobble",
   };
@@ -320,10 +337,39 @@ export function isLatLngInWanderRegion(
   coords: LatLng,
   region: WanderRegion,
 ): boolean {
+  const path = region.polygonPath;
+  if (path && path.length >= 3) {
+    return isLatLngInPolygon(coords, path);
+  }
   return (
     coords.lat >= region.minLat &&
     coords.lat <= region.maxLat &&
     coords.lng >= region.minLng &&
     coords.lng <= region.maxLng
   );
+}
+
+/** Build bbox from polygon path and attach as `polygonPath` (duplicate closing vertex is dropped). */
+export function wanderRegionFromPolygonPath(path: LatLng[]): WanderRegion {
+  const ring =
+    path.length >= 2 &&
+    path[0].lat === path[path.length - 1].lat &&
+    path[0].lng === path[path.length - 1].lng
+      ? path.slice(0, -1)
+      : path;
+  const box = computeBBoxFromPath(ring);
+  return {
+    ...box,
+    polygonPath: ring.map((p) => ({ lat: p.lat, lng: p.lng })),
+  };
+}
+
+/** Bbox-only region (clears polygon). */
+export function wanderRegionFromBBox(
+  minLat: number,
+  maxLat: number,
+  minLng: number,
+  maxLng: number,
+): WanderRegion {
+  return { minLat, maxLat, minLng, maxLng };
 }

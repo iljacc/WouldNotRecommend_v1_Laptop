@@ -5,6 +5,8 @@ import { HudChip } from "./HudChip";
 
 interface Props {
   startTime: number;
+  /** Omit the pill wrapper (e.g. city + time on one row). */
+  bare?: boolean;
 }
 
 function formatElapsed(milliseconds: number): string {
@@ -18,7 +20,7 @@ function formatElapsed(milliseconds: number): string {
     .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export function Timestamp({ startTime }: Props) {
+export function Timestamp({ startTime, bare }: Props) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -28,11 +30,13 @@ export function Timestamp({ startTime }: Props) {
     return () => window.clearInterval(interval);
   }, [startTime]);
 
-  return (
-    <HudChip>
-      <span className="text-xs text-white/60 tabular-nums">
-        {formatElapsed(elapsed)}
-      </span>
-    </HudChip>
+  const inner = (
+    <span className="shrink-0 text-xs text-white/60 tabular-nums">
+      {formatElapsed(elapsed)}
+    </span>
   );
+
+  if (bare) return inner;
+
+  return <HudChip>{inner}</HudChip>;
 }

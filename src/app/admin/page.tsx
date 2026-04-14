@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import destinations from "../../../data/teleport-destinations.json";
 import {
@@ -7,19 +8,39 @@ import {
   type BotActivityMessage,
 } from "@/lib/bot-activity";
 import {
+  addSavedWanderArea,
+  loadSavedWanderAreas,
+  removeSavedWanderArea,
+  type SavedWanderArea,
+} from "@/lib/admin-saved-areas";
+import {
   createDefaultBotSettings,
   getBotSettings,
   isLatLngInWanderRegion,
   postSoftResetSignal,
   reloadBotSettingsFromStorage,
   resetBotSettingsToDefaults,
+  saveBotSettings,
   saveFullBotSettings,
   type BotSettings,
+  type CustomSpawnPoint,
   type LinkSelectionMode,
   type ReviewSelectionMode,
   type WanderRegion,
 } from "@/lib/bot-settings";
 import type { SessionStats } from "@/lib/types";
+
+const AdminRegionMap = dynamic(
+  () => import("@/components/admin/AdminRegionMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <p className="rounded border border-[#2a3328] bg-[#0e100e] p-4 text-xs text-[#6d7a66]">
+        Loading map…
+      </p>
+    ),
+  },
+);
 
 const ADMIN_SESSION_KEY = "gsv-admin-session";
 const MAX_ACTIVITY_LINES = 500;
@@ -65,6 +86,14 @@ export default function AdminPage() {
   const bottomAct = useRef<HTMLDivElement | null>(null);
 
   const destCount = useMemo(() => countDestinationsInRegion(form.wanderRegion), [form.wanderRegion]);
+
+  const [savedAreas, setSavedAreas] = useState<SavedWanderArea[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [spawnPlacementEnabled, setSpawnPlacementEnabled] = useState(false);
+
+  useEffect(() => {
+    setSavedAreas(loadSavedWanderAreas());
+  }, []);
 
   const reloadForm = useCallback(() => {
     reloadBotSettingsFromStorage();
@@ -198,11 +227,49 @@ export default function AdminPage() {
     }));
   };
 
-  const patchRegion = (key: keyof WanderRegion, value: number) => {
+  const patchRegion = (key: "minLat" | "maxLat" | "minLng" | "maxLng", value: number) => {
     setForm((f) => ({
       ...f,
-      wanderRegion: { ...f.wanderRegion, [key]: value },
+      wanderRegion: {
+        ...f.wanderRegion,
+        [key]: value,
+        polygonPath: undefined,
+      },
     }));
+  };
+
+  const setWanderRegion = useCallback((region: WanderRegion) => {
+    setForm((f) => ({ ...f, wanderRegion: region }));
+  }, []);
+
+  const setSpawnPoints = useCallback((points: CustomSpawnPoint[]) => {
+    setForm((f) => ({ ...f, customSpawnPoints: points }));
+  }, []);
+
+  const removeSpawnPoint = (id: string) => {
+    setForm((f) => ({
+      ...f,
+      customSpawnPoints: f.customSpawnPoints.filter((p) => p.id !== id),
+    }));
+  };
+
+  const saveWanderRegionToStorage = () => {
+    saveBotSettings({ wanderRegion: form.wanderRegion });
+  };
+
+  const saveSpawnPointsToStorage = () => {
+    saveBotSettings({ customSpawnPoints: form.customSpawnPoints });
+  };
+
+  const saveAreaPreset = () => {
+    const list = addSavedWanderArea(presetName, form.wanderRegion);
+    setSavedAreas(list);
+    setPresetName("");
+  };
+
+  const deleteSelectedPreset = (id: string) => {
+    const list = removeSavedWanderArea(id);
+    setSavedAreas(list);
   };
 
   const num = (
@@ -291,6 +358,7 @@ export default function AdminPage() {
               <ul className="grid gap-1 sm:grid-cols-2">
                 <li>Sessions: {stats.totalSessions}</li>
                 <li>Reviews read: {stats.totalReviewsRead}</li>
+                <li>Reviews today (UTC): {stats.reviewsToday}</li>
                 <li>Runtime (s): {Math.round(stats.totalRuntimeSeconds)}</li>
                 <li>Distance (km): {stats.totalDistanceKm.toFixed(2)}</li>
                 <li>Locations scanned: {stats.totalLocationsScanned}</li>
@@ -376,20 +444,158 @@ export default function AdminPage() {
 
         <section>
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6d7a66]">
-            Wander region (bbox)
+            Wander region & spawns
           </h2>
           <p className="mb-3 text-xs text-[#6d7a66]">
-            Businesses and teleport picks filter to this box. Teleport pool:{" "}
+            Draw a polygon on the map, or use the bounding box fields. Businesses and teleport picks
+            filter to this region (polygon when set, otherwise axis-aligned box). Teleport pool:{" "}
             <strong className="text-[#9faa8f]">{destCount}</strong> of {destinations.length}{" "}
-            destinations in <code className="text-[#7d8a78]">teleport-destinations.json</code>
-            . If 0, the app falls back to the full list (see engine).
+            destinations in <code className="text-[#7d8a78]">teleport-destinations.json</code>. If 0,
+            the app falls back to the full list (see engine). Custom spawn points override random
+            picks from that list when at least one spawn is saved.
           </p>
+
+          {process.env.NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY ? (
+            <AdminRegionMap
+              wanderRegion={form.wanderRegion}
+              onWanderRegionChange={setWanderRegion}
+              spawnPoints={form.customSpawnPoints}
+              onSpawnPointsChange={setSpawnPoints}
+              spawnPlacementEnabled={spawnPlacementEnabled}
+            />
+          ) : (
+            <p className="mb-3 rounded border border-[#5a3030] bg-[#1a1510] p-3 text-xs text-amber-200/90">
+              Set <code className="text-[#9faa8f]">NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY</code> to use
+              the map editor.
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <label className="flex min-w-[12rem] flex-col gap-1 text-xs text-[#8a9688]">
+              Saved area presets
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  const found = savedAreas.find((a) => a.id === id);
+                  if (found) setWanderRegion(found.region);
+                  e.target.value = "";
+                }}
+                className="rounded border border-[#2a3328] bg-[#121610] px-2 py-1.5 text-[#d0dcc8]"
+              >
+                <option value="">Load a saved area…</option>
+                {savedAreas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-[#8a9688]">
+                New preset name
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="e.g. City centre"
+                  className="w-48 rounded border border-[#2a3328] bg-[#121610] px-2 py-1.5 text-[#d0dcc8]"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={saveAreaPreset}
+                className="rounded bg-[#3a5a40] px-3 py-2 text-xs text-white hover:bg-[#4a6a50]"
+              >
+                Save area as preset
+              </button>
+            </div>
+          </div>
+          {savedAreas.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs text-[#6d7a66]">
+              {savedAreas.map((a) => (
+                <li key={a.id} className="flex items-center gap-2">
+                  <span className="text-[#8a9688]">{a.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => deleteSelectedPreset(a.id)}
+                    className="rounded px-2 py-0.5 text-[#d8a0a0] hover:bg-[#2a1818]"
+                  >
+                    Remove preset
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={saveWanderRegionToStorage}
+              className="rounded bg-[#2d4a35] px-3 py-2 text-xs text-[#e8ece0] hover:bg-[#3a5a40]"
+            >
+              Save wander region to bot
+            </button>
+            <button
+              type="button"
+              onClick={() => setSpawnPlacementEnabled((v) => !v)}
+              className={`rounded border px-3 py-2 text-xs ${
+                spawnPlacementEnabled
+                  ? "border-[#5a8060] bg-[#1a2818] text-[#a8d4a8]"
+                  : "border-[#2a3328] text-[#9faa8f] hover:bg-[#1a1e18]"
+              }`}
+            >
+              {spawnPlacementEnabled ? "Stop placing spawns" : "Place spawns on map (click)"}
+            </button>
+            <button
+              type="button"
+              onClick={saveSpawnPointsToStorage}
+              className="rounded bg-[#2d4a35] px-3 py-2 text-xs text-[#e8ece0] hover:bg-[#3a5a40]"
+            >
+              Save spawn points to bot
+            </button>
+          </div>
+
+          <h3 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wide text-[#5a6658]">
+            Bounding box (clears polygon when edited)
+          </h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {num("minLat", form.wanderRegion.minLat, (v) => patchRegion("minLat", v), 0.0001)}
             {num("maxLat", form.wanderRegion.maxLat, (v) => patchRegion("maxLat", v), 0.0001)}
             {num("minLng", form.wanderRegion.minLng, (v) => patchRegion("minLng", v), 0.0001)}
             {num("maxLng", form.wanderRegion.maxLng, (v) => patchRegion("maxLng", v), 0.0001)}
           </div>
+
+          <h3 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wide text-[#5a6658]">
+            Spawn points ({form.customSpawnPoints.length})
+          </h3>
+          {form.customSpawnPoints.length === 0 ? (
+            <p className="text-xs text-[#5a6658]">
+              None — enable “Place spawns on map” and click the map, or rely on teleport
+              destinations from JSON.
+            </p>
+          ) : (
+            <ul className="max-h-48 space-y-2 overflow-y-auto rounded border border-[#2a3328] bg-[#0e100e] p-2 text-xs">
+              {form.customSpawnPoints.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1a1e18] py-1 last:border-0"
+                >
+                  <span className="font-mono text-[#a8b4a0]">
+                    {p.lat.toFixed(6)}, {p.lng.toFixed(6)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeSpawnPoint(p.id)}
+                    className="shrink-0 rounded px-2 py-1 text-[#d8a0a0] hover:bg-[#2a1818]"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section>

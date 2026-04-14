@@ -39,6 +39,10 @@ export class StreetViewController {
   private options: StreetViewControllerOptions = {};
   private faultDebounce: number | null = null;
   private hasSeenOkStatus = false;
+  /** Prevents repeated `onImageryFault` until status is OK again or we teleport. */
+  private imageryFaultEmitted = false;
+  /** Clock for "never loaded OK" UNKNOWN_ERROR grace (new pano / spawn). */
+  private panoChangedAt = 0;
   /** Bumps to cancel in-flight heading animations (pans + step blends). */
   private headingMotionGeneration = 0;
   /** True while `runHeadingMotion` drives POV (pans / step blends); wander float is paused. */
@@ -112,12 +116,21 @@ export class StreetViewController {
       disableDoubleClickZoom: true,
     });
 
+    this.panoChangedAt = Date.now();
+
     this.panorama.addListener("status_changed", () => {
       this.scheduleFaultCheck();
     });
     this.panorama.addListener("pano_changed", () => {
+      this.panoChangedAt = Date.now();
       this.scheduleFaultCheck();
     });
+  }
+
+  /** Street View reports OK — safe to drive POV without spamming failed tile fetches. */
+  private isImageryRenderable(): boolean {
+    const status = this.panorama?.getStatus?.();
+    return status === "OK";
   }
 
   private scheduleFaultCheck(): void {
@@ -128,13 +141,34 @@ export class StreetViewController {
       this.faultDebounce = null;
       const status = this.panorama?.getStatus?.();
       if (status === undefined) return;
+
       if (status === "OK") {
         this.hasSeenOkStatus = true;
+        this.imageryFaultEmitted = false;
         return;
       }
-      if (!this.hasSeenOkStatus) return;
-      this.options.onImageryFault?.();
-    }, 400);
+
+      if (this.imageryFaultEmitted) return;
+
+      const elapsedOnPano = Date.now() - this.panoChangedAt;
+
+      if (status === "ZERO_RESULTS") {
+        this.imageryFaultEmitted = true;
+        this.options.onImageryFault?.();
+        return;
+      }
+
+      if (this.hasSeenOkStatus) {
+        this.imageryFaultEmitted = true;
+        this.options.onImageryFault?.();
+        return;
+      }
+
+      if (status === "UNKNOWN_ERROR" && elapsedOnPano >= 3_500) {
+        this.imageryFaultEmitted = true;
+        this.options.onImageryFault?.();
+      }
+    }, 200);
   }
 
   getCoords(): LatLng {
@@ -149,7 +183,7 @@ export class StreetViewController {
 
   /** POV without wander sway — used during scripted pans. */
   private applyNavPovOnly(): void {
-    if (!this.panorama) return;
+    if (!this.panorama || !this.isImageryRenderable()) return;
     const pitch = getBotSettings().streetView.pitch;
     this.panorama.setPov({
       heading: (this.currentHeading + 360) % 360,
@@ -159,7 +193,7 @@ export class StreetViewController {
 
   /** POV with optional wander float (only when walking and not in a heading animation). */
   private applyWanderPovWithFloat(): void {
-    if (!this.panorama) return;
+    if (!this.panorama || !this.isImageryRenderable()) return;
     const sv = getBotSettings().streetView;
     if (!sv.wanderLookFloatEnabled) {
       this.applyNavPovOnly();
@@ -183,7 +217,7 @@ export class StreetViewController {
         return;
       }
 
-      if (!this.headingMotionInProgress) {
+      if (!this.headingMotionInProgress && this.isImageryRenderable()) {
         const sv = getBotSettings().streetView;
         const t = performance.now() * 0.001;
         const k = sv.wanderLookDrift;
@@ -233,7 +267,7 @@ export class StreetViewController {
   }
 
   stepForward(): boolean {
-    if (!this.panorama) return false;
+    if (!this.panorama || !this.isImageryRenderable()) return false;
     const links = this.getLinks();
     if (links.length === 0) return false;
 
@@ -325,6 +359,12 @@ export class StreetViewController {
           resolve();
           return;
         }
+        if (!this.isImageryRenderable()) {
+          this.headingMotionInProgress = false;
+          onSettled?.();
+          resolve();
+          return;
+        }
 
         const elapsed = performance.now() - startTime;
         const linearT = Math.min(1, elapsed / durationMs);
@@ -363,6 +403,8 @@ export class StreetViewController {
     this.stopWanderFloatLoop();
     this.cancelHeadingMotion();
     this.hasSeenOkStatus = false;
+    this.imageryFaultEmitted = false;
+    this.panoChangedAt = Date.now();
     this.panorama.setPosition(coords);
     this.currentHeading = Math.random() * 360;
     this.applyNavPovOnly();

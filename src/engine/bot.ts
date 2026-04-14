@@ -6,7 +6,7 @@ import {
   reloadBotSettingsFromStorage,
   subscribeBotSettings,
 } from "@/lib/bot-settings";
-import { DEFAULT_START } from "@/lib/config";
+import { DEFAULT_START, SUBTITLE_TIMING } from "@/lib/config";
 import {
   BotState,
   stateToMode,
@@ -14,6 +14,7 @@ import {
   type BotEvent,
   type LatLng,
   type ReviewLogEntry,
+  type TtsSubtitlePayload,
 } from "@/lib/types";
 import {
   canTriggerNextReview,
@@ -57,15 +58,22 @@ export class Bot {
   private teleports = 0;
   private lastScreenshotFilename = "";
   private ttsStartedAt = 0;
+  private onSubtitleChange: ((p: TtsSubtitlePayload | null) => void) | null =
+    null;
+  private subtitleHideTimer: Timer | null = null;
   /** Avoid duplicate STATE lines; WANDER is not logged here (use SEARCHING per step). */
   private lastActivityBroadcastState: BotState | null = null;
   private unsubscribeSettings: (() => void) | null = null;
+  /** Session city from spawn geocode only; kept across teleports within the run. */
+  private sessionCityResolved = false;
 
   async start(
     container: HTMLElement,
     onStateChange: BotStateCallback,
+    options?: { onSubtitleChange?: (p: TtsSubtitlePayload | null) => void },
   ): Promise<void> {
     this.onStateChange = onStateChange;
+    this.onSubtitleChange = options?.onSubtitleChange ?? null;
 
     await waitForVoices();
     await this.audio.init();
@@ -96,7 +104,8 @@ export class Bot {
       () => this.applySettingsHotReload(),
       () => this.applySoftReset(),
     );
-    this.updateCity();
+    /** City label from reverse-geocode at **spawn** (Street View start), not the host machine. */
+    void this.resolveSessionCityWithRetries(spawn);
     this.notifyStateChange();
   }
 
@@ -108,6 +117,12 @@ export class Bot {
     this.running = false;
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
+    if (this.subtitleHideTimer) {
+      clearTimeout(this.subtitleHideTimer);
+      this.subtitleHideTimer = null;
+    }
+    this.onSubtitleChange?.(null);
+    this.onSubtitleChange = null;
     this.tts.stop();
     this.audio.destroy();
     this.streetView.destroy();
@@ -204,7 +219,7 @@ export class Bot {
       case "STUCK_DETECTED":
         return "stuck_threshold";
       case "TELEPORT_TRIGGERED":
-        if (prevState === BotState.WANDER) return "imagery_fault_or_path";
+        if (prevState === BotState.WANDER) return "imagery_fault";
         if (prevState === BotState.DETECT) return "interrupt_during_detect";
         if (prevState === BotState.DELIVER) return "interrupt_during_deliver";
         if (prevState === BotState.RETURN) return "interrupt_during_return";
@@ -430,12 +445,26 @@ export class Bot {
   }
 
   private async handleTts(text: string): Promise<void> {
+    if (this.subtitleHideTimer) {
+      clearTimeout(this.subtitleHideTimer);
+      this.subtitleHideTimer = null;
+    }
     this.ttsStartedAt = Date.now();
+    this.onSubtitleChange?.({ fullText: text, revealed: 0 });
     try {
-      await this.tts.speak(text);
+      await this.tts.speak(text, {
+        onReveal: (n) => {
+          this.onSubtitleChange?.({ fullText: text, revealed: n });
+        },
+      });
     } catch (error) {
       console.error("TTS error:", error);
     }
+    this.onSubtitleChange?.({ fullText: text, revealed: text.length });
+    this.subtitleHideTimer = setTimeout(() => {
+      this.onSubtitleChange?.(null);
+      this.subtitleHideTimer = null;
+    }, SUBTITLE_TIMING.LINGER_AFTER_COMPLETE_MS + SUBTITLE_TIMING.FADE_OUT_MS);
     if (this.running && this.context.state === BotState.DELIVER) {
       this.dispatch({ type: "DELIVER_COMPLETE" });
     }
@@ -446,10 +475,14 @@ export class Bot {
     this.teleporting = true;
 
     const timing = getBotSettings().timing;
+    const imageryRecovery = cause === "imagery_fault";
+    const fadeOut = imageryRecovery ? 80 : timing.teleportFadeOut;
+    const fadeIn = imageryRecovery ? 120 : timing.teleportFadeIn;
+
     this.context = { ...this.context, teleportPhase: "fade-out" };
-    this.audio.fadeToSilence(timing.teleportFadeOut);
+    this.audio.fadeToSilence(fadeOut);
     this.notifyStateChange();
-    await this.sleep(timing.teleportFadeOut);
+    await this.sleep(fadeOut);
 
     this.context = { ...this.context, teleportPhase: "warp" };
     postActivity("TELEPORT", ["warp"]);
@@ -470,19 +503,17 @@ export class Bot {
     this.context = {
       ...this.context,
       currentCoords: destination,
-      currentCity: "Unknown",
       targetBusiness: null,
       reviewToRead: null,
     };
     this.teleportManager.resetStuckDetection(destination);
     void this.updateStats();
-    void this.updateCity();
 
     this.context = { ...this.context, teleportPhase: "fade-in" };
     postActivity("TELEPORT", ["fade-in"]);
-    this.audio.fadeFromSilence(timing.teleportFadeIn);
+    this.audio.fadeFromSilence(fadeIn);
     this.notifyStateChange();
-    await this.sleep(timing.teleportFadeIn);
+    await this.sleep(fadeIn);
 
     this.context = { ...this.context, teleportPhase: "none" };
     postActivity("TELEPORT", ["complete — resuming wander"]);
@@ -542,31 +573,85 @@ export class Bot {
     await this.logAction("logReview", { entry });
   }
 
-  private async updateCity(): Promise<void> {
-    try {
-      const params = new URLSearchParams({
-        lat: String(this.context.currentCoords.lat),
-        lng: String(this.context.currentCoords.lng),
-      });
-      const response = await fetch(`/api/geocode?${params.toString()}`);
-      const data = (await response.json()) as {
-        city?: string;
-        country?: string | null;
-      };
+  /**
+   * Reverse-geocode the **session spawn** coordinates until we get a non-Unknown place
+   * or exhaust attempts. Coordinates are always the bot’s start position in the world,
+   * never derived from the server host.
+   */
+  private async resolveSessionCityWithRetries(coords: LatLng): Promise<void> {
+    if (this.sessionCityResolved) return;
 
-      this.context = {
-        ...this.context,
-        currentCity: data.city || "Unknown",
-      };
+    const maxAttempts = 12;
+    const baseDelayMs = 450;
 
-      if (data.country) {
-        await this.logAction("addCountry", { country: data.country });
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (!this.running) return;
+
+      try {
+        const params = new URLSearchParams({
+          lat: String(coords.lat),
+          lng: String(coords.lng),
+        });
+        const response = await fetch(`/api/geocode?${params.toString()}`);
+        const data = (await response.json()) as {
+          city?: string;
+          country?: string | null;
+          googleStatus?: string;
+        };
+
+        if (!response.ok) {
+          console.warn(
+            "Geocode HTTP error:",
+            response.status,
+            attempt + 1,
+            "/",
+            maxAttempts,
+          );
+        } else {
+          const raw = (data.city ?? "").trim();
+          const looksUnknown =
+            raw.length === 0 ||
+            /^unknown$/i.test(raw) ||
+            /^unknown\s*,/i.test(raw);
+
+          if (!looksUnknown) {
+            this.sessionCityResolved = true;
+            this.context = {
+              ...this.context,
+              currentCity: raw,
+            };
+
+            if (data.country) {
+              await this.logAction("addCountry", { country: data.country });
+            }
+
+            this.notifyStateChange();
+            return;
+          }
+
+          if (data.googleStatus && data.googleStatus !== "OK") {
+            console.warn(
+              "Geocode:",
+              data.googleStatus,
+              "attempt",
+              attempt + 1,
+              "/",
+              maxAttempts,
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Geocode fetch failed:", error, "attempt", attempt + 1);
       }
 
-      this.notifyStateChange();
-    } catch (error) {
-      console.error("Geocode failed:", error);
+      if (!this.running) return;
+
+      const delayMs = Math.min(8_000, baseDelayMs * 1.55 ** attempt);
+      await this.sleep(delayMs);
     }
+
+    this.sessionCityResolved = true;
+    this.notifyStateChange();
   }
 
   private async updateStats(): Promise<void> {

@@ -100,6 +100,8 @@ export interface SessionStats {
   totalDistanceKm: number;
   totalLocationsScanned: number;
   totalReviewsRead: number;
+  /** Logged reviews with timestamp in [dayStart, dayEnd) when requesting /api/log with day bounds. */
+  reviewsToday: number;
   totalScreenshots: number;
   countriesVisited: string[];
   totalTeleports: number;
@@ -107,8 +109,19 @@ export interface SessionStats {
 
 export type AmbientLayer = "A" | "B";
 
+export interface TtsSpeakOptions {
+  /** Called with how many leading characters should be shown (typewriter / sync with speech). */
+  onReveal?: (revealedCharCount: number) => void;
+}
+
 export interface TTSEngine {
-  speak(text: string): Promise<void>;
+  speak(text: string, options?: TtsSpeakOptions): Promise<void>;
   stop(): void;
   isSpeaking(): boolean;
+}
+
+/** Live subtitle line while TTS is running (or briefly after). */
+export interface TtsSubtitlePayload {
+  fullText: string;
+  revealed: number;
 }

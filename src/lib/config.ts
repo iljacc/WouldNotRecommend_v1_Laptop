@@ -21,6 +21,12 @@ export const TIMING = {
   STATS_UPDATE_INTERVAL: 30_000,
 } as const;
 
+/** After typewriter completes: linger, then CSS fade in `TtsSubtitles`; bot clears after both (keep in sync). */
+export const SUBTITLE_TIMING = {
+  LINGER_AFTER_COMPLETE_MS: 12_000,
+  FADE_OUT_MS: 1_200,
+} as const;
+
 /** Den Haag retail / city-centre crawl bounds (commercial shopping areas). */
 export const HAGUE_REGION = {
   minLat: 52.065,
@@ -92,7 +98,8 @@ export const AUDIO = {
 } as const;
 
 export const PULSING_DOT = {
-  SIZE: 10,
+  /** Base box for search / text / dot glyphs (3× prior 10px). */
+  SIZE: 30,
   SEARCHING_CYCLE: 2_000,
   PROCESSING_CYCLE: 1_000,
 } as const;
@@ -102,3 +109,14 @@ export const DEFAULT_START: LatLng = {
   lat: 52.075,
   lng: 4.312,
 };
+
+/** Bot page-only toggles (build-time `NEXT_PUBLIC_*`). */
+export const BOT_PAGE = {
+  /**
+   * Three.js CCTV-style overlay on Street View. Off by default — set
+   * `NEXT_PUBLIC_BOT_CCTV_OVERLAY=true` in `.env.local` to try it.
+   */
+  CCTV_OVERLAY_ENABLED: process.env.NEXT_PUBLIC_BOT_CCTV_OVERLAY === "true",
+  /** Final blend strength of the overlay layer (multiplies the WebGL composite). */
+  CCTV_OVERLAY_LAYER_OPACITY: 0.1,
+} as const;

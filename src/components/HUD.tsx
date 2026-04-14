@@ -1,56 +1,66 @@
 "use client";
 
-import type { BotMode, LatLng } from "@/lib/types";
+import type { BotMode, BotState, LatLng, TtsSubtitlePayload } from "@/lib/types";
 import { CityLocation } from "./CityLocation";
 import { Coordinates } from "./Coordinates";
 import { HudChip } from "./HudChip";
-import { LifetimeReviewsTotal } from "./LifetimeReviewsTotal";
 import { ModeIndicator } from "./ModeIndicator";
-import { PulsingDot } from "./PulsingDot";
-import { SessionCounter } from "./SessionCounter";
+import { ModePulseGlyph } from "./ModePulseGlyph";
+import { ReviewStatsChip } from "./ReviewStatsChip";
 import { Timestamp } from "./Timestamp";
+import { TtsSubtitles } from "./TtsSubtitles";
 
 interface Props {
   mode: BotMode;
+  botState: BotState;
   coords: LatLng;
   city: string;
-  reviewCount: number;
+  reviewsToday: number | null;
   lifetimeReviewsTotal: number | null;
   sessionStartTime: number;
+  subtitle: TtsSubtitlePayload | null;
 }
 
 export function HUD({
   mode,
+  botState,
   coords,
   city,
-  reviewCount,
+  reviewsToday,
   lifetimeReviewsTotal,
   sessionStartTime,
+  subtitle,
 }: Props) {
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 font-mono">
+    <div className="pointer-events-none absolute inset-0 z-[38] font-mono">
       <div className="absolute top-6 left-6 sm:top-8 sm:left-8">
-        <SessionCounter count={reviewCount} />
+        <ReviewStatsChip
+          reviewsToday={reviewsToday}
+          lifetimeTotal={lifetimeReviewsTotal}
+        />
       </div>
 
-      <div className="absolute top-6 right-6 sm:top-8 sm:right-8">
-        <LifetimeReviewsTotal total={lifetimeReviewsTotal} />
+      <div className="absolute top-6 right-6 flex max-w-[min(52vw,calc(100%-3rem))] flex-col items-end gap-1.5 text-right sm:top-8 sm:right-8">
+        <Coordinates coords={coords} />
+        <HudChip className="inline-flex w-fit max-w-full min-w-0 justify-end">
+          <div className="flex min-w-0 max-w-full items-center justify-end gap-1">
+            <CityLocation city={city} bare />
+            <span className="shrink-0 text-xs text-white/60">, </span>
+            <Timestamp startTime={sessionStartTime} bare />
+          </div>
+        </HudChip>
       </div>
 
-      <div className="absolute bottom-6 left-6 flex flex-col items-start gap-1.5 text-left sm:bottom-8 sm:left-8">
+      <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8">
         <HudChip>
           <div className="flex items-center gap-2.5">
-            <PulsingDot mode={mode} />
+            <ModePulseGlyph mode={mode} state={botState} />
             <ModeIndicator mode={mode} />
           </div>
         </HudChip>
       </div>
 
-      <div className="absolute bottom-6 right-6 flex max-w-[52vw] flex-col items-end gap-1.5 text-right sm:bottom-8 sm:right-8">
-        <Coordinates coords={coords} />
-        <CityLocation city={city} />
-        <Timestamp startTime={sessionStartTime} />
-      </div>
+      <TtsSubtitles subtitle={subtitle} />
     </div>
   );
 }

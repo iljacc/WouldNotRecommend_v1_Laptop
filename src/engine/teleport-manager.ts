@@ -28,6 +28,17 @@ export class TeleportManager {
 
   /** Random commercial spawn in wander region (Street View resolves nearest pano). */
   getRandomSpawnCoords(): LatLng {
+    const settings = getBotSettings();
+    const custom = settings.customSpawnPoints ?? [];
+    if (custom.length > 0) {
+      const region = settings.wanderRegion;
+      const inRegion = custom.filter((p) =>
+        isLatLngInWanderRegion({ lat: p.lat, lng: p.lng }, region),
+      );
+      const pool = inRegion.length > 0 ? inRegion : custom;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      return { lat: pick.lat, lng: pick.lng };
+    }
     const pool = this.destinationPool();
     const pick = pool[Math.floor(Math.random() * pool.length)];
     return { lat: pick.lat, lng: pick.lng };

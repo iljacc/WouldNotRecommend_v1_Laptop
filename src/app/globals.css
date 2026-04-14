@@ -49,15 +49,16 @@ a[href*="google.com/maps"] {
   display: none !important;
 }
 
+/* HUD mode glyphs (search / lines / dot): opacity + scale breathe — strong scale so it reads on kiosk */
 @keyframes pulse {
   0%,
   100% {
-    opacity: 0.35;
-    transform: scale(0.92);
+    opacity: 0.32;
+    transform: scale(0.65);
   }
 
   50% {
-    opacity: 0.9;
-    transform: scale(1);
+    opacity: 1;
+    transform: scale(1.28);
   }
 }

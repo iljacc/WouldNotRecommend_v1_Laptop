@@ -1,6 +1,6 @@
 "use client";
 
-import type { TTSEngine } from "@/lib/types";
+import type { TtsSpeakOptions, TTSEngine } from "@/lib/types";
 
 export class WebSpeechTTS implements TTSEngine {
   private synth: SpeechSynthesis;
@@ -10,7 +10,7 @@ export class WebSpeechTTS implements TTSEngine {
     this.synth = window.speechSynthesis;
   }
 
-  speak(text: string): Promise<void> {
+  speak(text: string, options?: TtsSpeakOptions): Promise<void> {
     return new Promise((resolve, reject) => {
       this.stop();
 
@@ -33,15 +33,63 @@ export class WebSpeechTTS implements TTSEngine {
       const fallback = voices.find((voice) => voice.lang.startsWith("en"));
       utterance.voice = preferred || fallback || null;
 
+      let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+      let boundarySeen = false;
+      const clearFallback = () => {
+        if (fallbackInterval !== null) {
+          clearInterval(fallbackInterval);
+          fallbackInterval = null;
+        }
+      };
+
+      const reveal = (n: number) => {
+        options?.onReveal?.(Math.min(Math.max(0, n), text.length));
+      };
+
+      const startFallbackTyping = () => {
+        if (boundarySeen) return;
+        const startT = Date.now();
+        const charsPerSec = 13 * utterance.rate;
+        fallbackInterval = setInterval(() => {
+          if (boundarySeen) {
+            clearFallback();
+            return;
+          }
+          const n = Math.min(
+            text.length,
+            Math.floor(((Date.now() - startT) / 1000) * charsPerSec),
+          );
+          reveal(n);
+          if (n >= text.length) clearFallback();
+        }, 40);
+      };
+
+      utterance.onboundary = (event: SpeechSynthesisEvent) => {
+        boundarySeen = true;
+        clearFallback();
+        const end = event.charIndex + (event.charLength || 0);
+        reveal(end);
+      };
+
       utterance.onstart = () => {
         this.speaking = true;
+        reveal(0);
+        window.setTimeout(() => {
+          startFallbackTyping();
+        }, 120);
       };
+
       utterance.onend = () => {
+        clearFallback();
         this.speaking = false;
+        reveal(text.length);
         resolve();
       };
-      utterance.onerror = (event) => {
+
+      utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+        clearFallback();
         this.speaking = false;
+        reveal(text.length);
         if (event.error === "interrupted" || event.error === "canceled") {
           resolve();
           return;

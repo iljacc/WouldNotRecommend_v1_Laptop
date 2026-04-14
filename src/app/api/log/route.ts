@@ -1,18 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   addCountry,
+  countReviewsBetween,
   createSession,
   getStats,
   insertReviewLog,
   updateSession,
 } from "@/lib/db";
-import type { ReviewLogEntry } from "@/lib/types";
+import type { ReviewLogEntry, SessionStats } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+function utcCalendarDayBounds(now = new Date()): {
+  dayStart: string;
+  dayEnd: string;
+} {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const start = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+  return { dayStart: start.toISOString(), dayEnd: end.toISOString() };
+}
+
+export async function GET(request: NextRequest) {
   try {
-    return NextResponse.json(getStats());
+    const base = getStats();
+    const { searchParams } = new URL(request.url);
+    const paramStart = searchParams.get("dayStart");
+    const paramEnd = searchParams.get("dayEnd");
+    const { dayStart, dayEnd } =
+      paramStart && paramEnd
+        ? { dayStart: paramStart, dayEnd: paramEnd }
+        : utcCalendarDayBounds();
+    const reviewsToday = countReviewsBetween(dayStart, dayEnd);
+    const payload: SessionStats = { ...base, reviewsToday };
+    return NextResponse.json(payload);
   } catch (error) {
     console.error("Failed to get stats:", error);
     return NextResponse.json({ error: "Failed to get stats" }, { status: 500 });

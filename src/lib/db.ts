@@ -133,7 +133,7 @@ export function addCountry(country: string): void {
     .run(country);
 }
 
-export function getStats(): SessionStats {
+export function getStats(): Omit<SessionStats, "reviewsToday"> {
   const one = <T>(query: string) => db().prepare(query).get() as T;
 
   const sessions = one<{ count: number }>("SELECT COUNT(*) as count FROM sessions");
@@ -169,6 +169,16 @@ export function getStats(): SessionStats {
     countriesVisited: countries.map((row) => row.country),
     totalTeleports: teleports.total,
   };
+}
+
+/** Count rows whose `timestamp` is in [startIso, endIsoExclusive) (ISO 8601 strings). */
+export function countReviewsBetween(startIso: string, endIsoExclusive: string): number {
+  const row = db()
+    .prepare(
+      `SELECT COUNT(*) as total FROM review_log WHERE timestamp >= ? AND timestamp < ?`,
+    )
+    .get(startIso, endIsoExclusive) as { total: number };
+  return row.total;
 }
 
 export type RecentReviewLogRow = {

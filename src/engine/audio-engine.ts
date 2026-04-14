@@ -44,25 +44,10 @@ export class AudioEngine {
     this.ambientAGain.connect(this.masterGain);
     this.ambientBGain.connect(this.masterGain);
 
-    await Promise.allSettled([
-      this.loadAudioFile("/audio/ambient-a.mp3").then((buffer) => {
-        this.ambientABuffer = buffer;
-      }),
-      this.loadAudioFile("/audio/ambient-b.mp3").then((buffer) => {
-        this.ambientBBuffer = buffer;
-      }),
-      this.loadAudioFile("/audio/bleep.mp3").then((buffer) => {
-        this.bleepBuffer = buffer;
-      }),
-      this.loadAudioFile("/audio/bloop.mp3").then((buffer) => {
-        this.bloopBuffer = buffer;
-      }),
-    ]);
-
-    this.ambientABuffer ||= this.generateAmbient(30, 120);
-    this.ambientBBuffer ||= this.generateAmbient(30, 150);
-    this.bleepBuffer ||= this.generateTone(660, 0.3, "ascending");
-    this.bloopBuffer ||= this.generateTone(440, 0.3, "descending");
+    this.ambientABuffer = this.generateAmbient(30, 120);
+    this.ambientBBuffer = this.generateAmbient(30, 150);
+    this.bleepBuffer = this.generateTone(660, 0.3, "ascending");
+    this.bloopBuffer = this.generateTone(440, 0.3, "descending");
 
     this.initialized = true;
   }
@@ -166,14 +151,6 @@ export class AudioEngine {
     source.connect(gain);
     gain.connect(this.masterGain);
     source.start();
-  }
-
-  private async loadAudioFile(url: string): Promise<AudioBuffer> {
-    if (!this.ctx) throw new Error("AudioContext not initialized");
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Audio file unavailable: ${url}`);
-    const arrayBuffer = await response.arrayBuffer();
-    return this.ctx.decodeAudioData(arrayBuffer);
   }
 
   private rampGain(node: GainNode, target: number, now: number, duration: number): void {

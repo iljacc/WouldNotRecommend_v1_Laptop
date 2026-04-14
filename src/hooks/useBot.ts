@@ -9,7 +9,21 @@ import {
   type LatLng,
   type SessionStats,
   type TeleportPhase,
+  type TtsSubtitlePayload,
 } from "@/lib/types";
+
+function localCalendarDayBounds(): { dayStart: string; dayEnd: string } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { dayStart: start.toISOString(), dayEnd: end.toISOString() };
+}
+
+function reviewStatsUrl(): string {
+  const { dayStart, dayEnd } = localCalendarDayBounds();
+  return `/api/log?${new URLSearchParams({ dayStart, dayEnd }).toString()}`;
+}
 
 export interface BotUIState {
   mode: BotMode;
@@ -26,9 +40,11 @@ export function useBot() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isStarted, setIsStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewsToday, setReviewsToday] = useState<number | null>(null);
   const [lifetimeReviewsTotal, setLifetimeReviewsTotal] = useState<number | null>(
     null,
   );
+  const [subtitle, setSubtitle] = useState<TtsSubtitlePayload | null>(null);
   const [uiState, setUIState] = useState<BotUIState>({
     mode: "Searching",
     state: BotState.WANDER,
@@ -51,13 +67,16 @@ export function useBot() {
     });
   }, []);
 
-  const refreshLifetimeReviews = useCallback(async () => {
+  const refreshReviewStats = useCallback(async () => {
     try {
-      const response = await fetch("/api/log");
+      const response = await fetch(reviewStatsUrl());
       if (!response.ok) return;
       const data = (await response.json()) as SessionStats;
       if (typeof data.totalReviewsRead === "number") {
         setLifetimeReviewsTotal(data.totalReviewsRead);
+      }
+      if (typeof data.reviewsToday === "number") {
+        setReviewsToday(data.reviewsToday);
       }
     } catch {
       /* ignore */
@@ -65,8 +84,15 @@ export function useBot() {
   }, []);
 
   useEffect(() => {
-    void refreshLifetimeReviews();
-  }, [refreshLifetimeReviews]);
+    void refreshReviewStats();
+  }, [refreshReviewStats]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshReviewStats();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [refreshReviewStats]);
 
   const lastSessionReviewCount = useRef<number | null>(null);
   useEffect(() => {
@@ -75,12 +101,12 @@ export function useBot() {
 
     if (prev !== null && uiState.reviewCount > prev) {
       const timer = window.setTimeout(() => {
-        void refreshLifetimeReviews();
+        void refreshReviewStats();
       }, 900);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [uiState.reviewCount, refreshLifetimeReviews]);
+  }, [uiState.reviewCount, refreshReviewStats]);
 
   const startBot = useCallback(async () => {
     if (!containerRef.current || botRef.current) return;
@@ -90,7 +116,9 @@ export function useBot() {
     botRef.current = bot;
 
     try {
-      await bot.start(containerRef.current, handleStateChange);
+      await bot.start(containerRef.current, handleStateChange, {
+        onSubtitleChange: setSubtitle,
+      });
       setIsStarted(true);
     } catch (startError) {
       console.error("Failed to start bot:", startError);
@@ -115,7 +143,9 @@ export function useBot() {
   return {
     containerRef,
     uiState,
+    reviewsToday,
     lifetimeReviewsTotal,
+    subtitle,
     isStarted,
     error,
     startBot,

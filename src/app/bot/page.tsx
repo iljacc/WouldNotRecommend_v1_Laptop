@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { CctvOverlayLayer } from "@/components/CctvOverlayLayer";
 import { HUD } from "@/components/HUD";
 import { StreetViewCanvas } from "@/components/StreetViewCanvas";
 import {
@@ -12,8 +13,16 @@ import { useBot } from "@/hooks/useBot";
 const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 
 export default function BotPage() {
-  const { containerRef, uiState, lifetimeReviewsTotal, isStarted, error, startBot } =
-    useBot();
+  const {
+    containerRef,
+    uiState,
+    reviewsToday,
+    lifetimeReviewsTotal,
+    subtitle,
+    isStarted,
+    error,
+    startBot,
+  } = useBot();
 
   useEffect(() => {
     if (!KIOSK_MODE || isStarted) return;
@@ -34,13 +43,17 @@ export default function BotPage() {
         <StreetViewCanvas ref={containerRef} />
       </div>
 
+      <CctvOverlayLayer />
+
       <HUD
         mode={uiState.mode}
+        botState={uiState.state}
         coords={uiState.coords}
         city={uiState.city}
-        reviewCount={uiState.reviewCount}
+        reviewsToday={reviewsToday}
         lifetimeReviewsTotal={lifetimeReviewsTotal}
         sessionStartTime={uiState.sessionStartTime}
+        subtitle={subtitle}
       />
 
       <VisualEffects teleportPhase={uiState.teleportPhase} />

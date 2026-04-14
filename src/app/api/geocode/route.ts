@@ -7,9 +7,38 @@ type AddressComponent = {
   types: string[];
 };
 
+/** Prefer a human place name; order tuned for EU / NL and dense cities. */
+const CITY_TYPE_PRIORITY = [
+  "locality",
+  "postal_town",
+  "administrative_area_level_3",
+  "administrative_area_level_2",
+  "sublocality",
+  "sublocality_level_1",
+  "neighborhood",
+  "administrative_area_level_1",
+] as const;
+
+function pickCityFromComponents(components: AddressComponent[]): string {
+  for (const type of CITY_TYPE_PRIORITY) {
+    const hit = components.find((c) => c.types.includes(type));
+    if (hit?.long_name) return hit.long_name;
+  }
+  return "";
+}
+
+function pickCountry(components: AddressComponent[]): string {
+  const hit = components.find((c) => c.types.includes("country"));
+  return hit?.long_name ?? "";
+}
+
 export async function GET(request: NextRequest) {
   if (!API_KEY) {
-    return NextResponse.json({ city: "Unknown", country: null });
+    return NextResponse.json({
+      city: "Unknown",
+      country: null,
+      googleStatus: "MISSING_SERVER_KEY",
+    });
   }
 
   const { searchParams } = new URL(request.url);
@@ -17,48 +46,68 @@ export async function GET(request: NextRequest) {
   const lng = searchParams.get("lng");
 
   if (!lat || !lng) {
-    return NextResponse.json({ city: "Unknown", country: null });
+    return NextResponse.json({
+      city: "Unknown",
+      country: null,
+      googleStatus: "INVALID_PARAMS",
+    });
   }
 
   try {
     const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+    /** Reverse-geocode the client-supplied point (bot spawn / Street View location), not the server. */
     url.searchParams.set("latlng", `${lat},${lng}`);
-    url.searchParams.set(
-      "result_type",
-      "locality|administrative_area_level_1|country",
-    );
+    url.searchParams.set("language", "en");
+    /** Omit narrow result_type so Google can return full address results (avoids empty sets). */
     url.searchParams.set("key", API_KEY);
 
     const res = await fetch(url.toString());
-    const data = await res.json();
+    const data = (await res.json()) as {
+      status: string;
+      results?: { address_components?: AddressComponent[]; formatted_address?: string }[];
+    };
 
     if (data.status !== "OK" || !data.results?.length) {
-      return NextResponse.json({ city: "Unknown", country: null });
+      return NextResponse.json({
+        city: "Unknown",
+        country: null,
+        googleStatus: data.status,
+      });
     }
 
     let city = "";
     let country = "";
 
-    for (const result of data.results as { address_components?: AddressComponent[] }[]) {
-      for (const component of result.address_components || []) {
-        if (component.types.includes("locality") && !city) {
-          city = component.long_name;
-        }
-        if (component.types.includes("administrative_area_level_1") && !city) {
-          city = component.long_name;
-        }
-        if (component.types.includes("country") && !country) {
-          country = component.long_name;
-        }
+    for (const result of data.results) {
+      const components = result.address_components || [];
+      if (!city) {
+        city = pickCityFromComponents(components);
+      }
+      if (!country) {
+        country = pickCountry(components);
       }
       if (city && country) break;
     }
 
-    const display = city && country ? `${city}, ${country}` : country || city || "Unknown";
+    if (!city && data.results[0]?.formatted_address) {
+      const first = data.results[0].formatted_address.split(",")[0]?.trim();
+      if (first && first.length < 80) city = first;
+    }
 
-    return NextResponse.json({ city: display, country: country || null });
+    const display =
+      city && country ? `${city}, ${country}` : country || city || "Unknown";
+
+    return NextResponse.json({
+      city: display,
+      country: country || null,
+      googleStatus: "OK",
+    });
   } catch (error) {
     console.error("Geocode error:", error);
-    return NextResponse.json({ city: "Unknown", country: null });
+    return NextResponse.json({
+      city: "Unknown",
+      country: null,
+      googleStatus: "FETCH_ERROR",
+    });
   }
 }
