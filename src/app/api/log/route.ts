@@ -25,8 +25,22 @@ function utcCalendarDayBounds(now = new Date()): {
 
 export async function GET(request: NextRequest) {
   try {
-    const base = getStats();
     const { searchParams } = new URL(request.url);
+    const metric = searchParams.get("metric");
+
+    if (metric === "reviewsToday") {
+      const { dayStart, dayEnd } = utcCalendarDayBounds();
+      return NextResponse.json({
+        reviewsToday: countReviewsBetween(dayStart, dayEnd),
+      });
+    }
+    if (metric === "totalReviewsRead") {
+      return NextResponse.json({
+        totalReviewsRead: getStats().totalReviewsRead,
+      });
+    }
+
+    const base = getStats();
     const paramStart = searchParams.get("dayStart");
     const paramEnd = searchParams.get("dayEnd");
     const { dayStart, dayEnd } =

@@ -596,7 +596,8 @@ export class Bot {
         const data = (await response.json()) as {
           city?: string;
           country?: string | null;
-          googleStatus?: string;
+          lookupStatus?: string;
+          detail?: string;
         };
 
         if (!response.ok) {
@@ -629,14 +630,15 @@ export class Bot {
             return;
           }
 
-          if (data.googleStatus && data.googleStatus !== "OK") {
+          if (data.lookupStatus && data.lookupStatus !== "OK") {
             console.warn(
               "Geocode:",
-              data.googleStatus,
+              data.lookupStatus,
               "attempt",
               attempt + 1,
               "/",
               maxAttempts,
+              data.detail ? `— ${data.detail}` : "",
             );
           }
         }

@@ -144,6 +144,42 @@ export default function AdminPage() {
     bottomAct.current?.scrollIntoView({ behavior: "smooth" });
   }, [activityLines.length]);
 
+  const setWanderRegion = useCallback((region: WanderRegion) => {
+    setForm((f) => ({ ...f, wanderRegion: region }));
+  }, []);
+
+  const setSpawnPoints = useCallback((points: CustomSpawnPoint[]) => {
+    setForm((f) => ({ ...f, customSpawnPoints: points }));
+  }, []);
+
+  const refreshAllStatsFromDb = useCallback(() => {
+    void fetch("/api/log")
+      .then((res) => res.json() as Promise<SessionStats>)
+      .then(setStats);
+  }, []);
+
+  const refreshReviewsTodayCount = useCallback(() => {
+    void fetch("/api/log?metric=reviewsToday")
+      .then((res) => res.json() as Promise<{ reviewsToday: number }>)
+      .then(({ reviewsToday }) => {
+        setStats((s) => (s ? { ...s, reviewsToday } : s));
+      });
+  }, []);
+
+  const refreshAllTimeReviewTotal = useCallback(() => {
+    void fetch("/api/log?metric=totalReviewsRead")
+      .then((res) => res.json() as Promise<{ totalReviewsRead: number }>)
+      .then(({ totalReviewsRead }) => {
+        setStats((s) => (s ? { ...s, totalReviewsRead } : s));
+      });
+  }, []);
+
+  const reloadRecentReviewRows = useCallback(() => {
+    void fetch("/api/log/recent?limit=40")
+      .then((res) => res.json() as Promise<{ entries?: RecentEntry[] }>)
+      .then((d) => setRecentDb(d.entries || []));
+  }, []);
+
   const tryUnlock = () => {
     if (!adminPassword || passwordInput === adminPassword) {
       sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
@@ -237,14 +273,6 @@ export default function AdminPage() {
       },
     }));
   };
-
-  const setWanderRegion = useCallback((region: WanderRegion) => {
-    setForm((f) => ({ ...f, wanderRegion: region }));
-  }, []);
-
-  const setSpawnPoints = useCallback((points: CustomSpawnPoint[]) => {
-    setForm((f) => ({ ...f, customSpawnPoints: points }));
-  }, []);
 
   const removeSpawnPoint = (id: string) => {
     setForm((f) => ({
@@ -357,8 +385,8 @@ export default function AdminPage() {
             {stats ? (
               <ul className="grid gap-1 sm:grid-cols-2">
                 <li>Sessions: {stats.totalSessions}</li>
-                <li>Reviews read: {stats.totalReviewsRead}</li>
-                <li>Reviews today (UTC): {stats.reviewsToday}</li>
+                <li>Reviews logged (all time): {stats.totalReviewsRead}</li>
+                <li>Reviews logged today (UTC): {stats.reviewsToday}</li>
                 <li>Runtime (s): {Math.round(stats.totalRuntimeSeconds)}</li>
                 <li>Distance (km): {stats.totalDistanceKm.toFixed(2)}</li>
                 <li>Locations scanned: {stats.totalLocationsScanned}</li>
@@ -371,13 +399,35 @@ export default function AdminPage() {
             ) : (
               <p className="text-[#6d7a66]">Loading…</p>
             )}
-            <button
-              type="button"
-              onClick={() => void fetch("/api/log").then((r) => r.json() as Promise<SessionStats>).then(setStats)}
-              className="mt-3 rounded border border-[#2a3328] px-3 py-1.5 text-xs text-[#9faa8f] hover:bg-[#1a1e18]"
-            >
-              Refresh stats
-            </button>
+            <p className="mt-3 text-[#5a6658]">
+              Fetches counts from the SQLite log on the server. Nothing is deleted or reset.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!stats}
+                onClick={refreshReviewsTodayCount}
+                className="rounded border border-[#2a3328] px-3 py-1.5 text-xs text-[#9faa8f] hover:bg-[#1a1e18] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Refresh today (UTC)
+              </button>
+              <button
+                type="button"
+                disabled={!stats}
+                onClick={refreshAllTimeReviewTotal}
+                className="rounded border border-[#2a3328] px-3 py-1.5 text-xs text-[#9faa8f] hover:bg-[#1a1e18] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Refresh all-time total
+              </button>
+              <button
+                type="button"
+                disabled={!stats}
+                onClick={refreshAllStatsFromDb}
+                className="rounded border border-[#3a4438] px-3 py-1.5 text-xs text-[#b8c4a8] hover:bg-[#1a1e18] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Refresh all lifetime stats
+              </button>
+            </div>
           </div>
         </section>
 
@@ -428,16 +478,15 @@ export default function AdminPage() {
                 </ul>
               )}
             </div>
+            <p className="mt-2 text-[#5a6658]">
+              Reloads the newest rows from the database (read-only; does not wipe or reset the DB).
+            </p>
             <button
               type="button"
-              onClick={() =>
-                void fetch("/api/log/recent?limit=40")
-                  .then((r) => r.json() as Promise<{ entries?: RecentEntry[] }>)
-                  .then((d) => setRecentDb(d.entries || []))
-              }
+              onClick={reloadRecentReviewRows}
               className="mt-2 rounded border border-[#2a3328] px-3 py-1.5 text-xs text-[#9faa8f] hover:bg-[#1a1e18]"
             >
-              Refresh DB list
+              Reload recent rows
             </button>
           </div>
         </section>

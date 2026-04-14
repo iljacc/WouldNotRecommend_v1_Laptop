@@ -23,5 +23,8 @@ pnpm-debug.log*
 data/db/
 data/screenshots/
 
+# GeoNames cache (local-reverse-geocoder)
+.cache/
+
 # System
 .DS_Store
