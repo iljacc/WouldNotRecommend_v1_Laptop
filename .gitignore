@@ -19,6 +19,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Piper TTS temp WAVs (api/tts)
+.tmp/
+
 # Project data
 data/db/
 data/screenshots/

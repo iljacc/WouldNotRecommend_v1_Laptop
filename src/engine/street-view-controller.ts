@@ -3,6 +3,7 @@
 import { Loader } from "@googlemaps/js-api-loader";
 import { getBotSettings } from "@/lib/bot-settings";
 import type { LatLng, StreetViewLink } from "@/lib/types";
+import { randomLatLngOffsetMeters } from "@/lib/wander-geo";
 
 /** Shortest signed delta from `from` to `to` in degrees (−180…180). */
 function shortestAngleDelta(from: number, to: number): number {
@@ -269,7 +270,10 @@ export class StreetViewController {
   stepForward(): boolean {
     if (!this.panorama || !this.isImageryRenderable()) return false;
     const links = this.getLinks();
-    if (links.length === 0) return false;
+    if (links.length === 0) {
+      this.nudgeAwayFromDeadEndPanorama();
+      return false;
+    }
 
     const sv = getBotSettings().streetView;
     const linkMode = getBotSettings().linkSelectionMode;
@@ -309,6 +313,26 @@ export class StreetViewController {
       },
     );
     return true;
+  }
+
+  /**
+   * User-contributed photospheres often have no outgoing links — jump a short distance so
+   * Street View can snap to coverage with walkable links (avoids waiting for stuck-teleport).
+   */
+  private nudgeAwayFromDeadEndPanorama(): void {
+    if (!this.panorama) return;
+    const pos = this.panorama.getPosition();
+    if (!pos) return;
+    const center = { lat: pos.lat(), lng: pos.lng() };
+    const next = randomLatLngOffsetMeters(center, 28, 260);
+    this.stopWanderFloatLoop();
+    this.cancelHeadingMotion();
+    this.hasSeenOkStatus = false;
+    this.imageryFaultEmitted = false;
+    this.panoChangedAt = Date.now();
+    this.panorama.setPosition(next);
+    this.currentHeading = Math.random() * 360;
+    this.applyNavPovOnly();
   }
 
   private cancelHeadingMotion(): void {

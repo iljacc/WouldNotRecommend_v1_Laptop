@@ -34,8 +34,8 @@ So: **search** casts a wider net; **detection** is stricter and decides what you
 
 The bot **does not** open Google Maps in a browser and scrape HTML. It uses **Google’s official Places API** through your app’s backend:
 
-1. **Nearby Search** (`/api/places` GET) returns a list of places near a latitude/longitude, with types like `establishment`.
-2. When a place is chosen, **Place Details** (`/api/places` POST with a `placeId`) asks Google for that place’s **review objects** among other fields. Those reviews are **whatever Google returns** in the API response (text, rating, author metadata)—subject to Google’s terms, quotas, and what each place exposes.
+1. **Nearby Search** (`/api/places` GET): the bot uses **lazy pagination** (`lazy=1`) — it loads **one page** (~20 POIs) per refresh, then requests **additional pages** only while hunting for a qualifying review, up to **`nearbySearchMaxPages`** (1–3). A legacy path without `lazy` can still merge multiple pages in one request (e.g. tooling). The server can cache the **first page** plus `next_page_token` for the same rough location (see admin: `nearbyCacheTtlMs`).
+2. When a place is chosen, **Place Details** (`/api/places` POST with a `placeId`) asks Google for that place’s **review objects** among other fields. Those reviews are **whatever Google returns** in the API response (text, rating, author metadata)—subject to Google’s terms, quotas, and what each place exposes. In one **detection tick**, the bot may try **several** nearest candidates (sorted by distance, then lower Google rating) up to **`MAX_PLACE_DETAILS_ATTEMPTS_PER_CHECK`**, then optionally load another Nearby page before the next 3s interval.
 
 So “scraping” in everyday language is better described as **authorized API fetch**: the server calls Google with your API key; the browser talks only to your server.
 
@@ -45,7 +45,7 @@ After fetching reviews for one place, the bot **filters** them:
 
 - **Star rating** must match the configured **target** (by default, **1 star**).
 - **Length** must be between a **minimum** and **maximum** character range (defaults tuned for short-ish quotes).
-- **Already read** in this session (by a simple hash of the text) is skipped so the same line is not repeated.
+- **Already read recently** (by a simple hash of the text) is skipped for a configurable **cooldown** (default about **30 minutes**) so the same line is not repeated back-to-back; after that, it may be read again (useful when the audience turns over in an installation).
 - **Language heuristic:** reviews where very little of the text looks Latin letters may be dropped (reduces noisy non-Latin spam in an English-forward install).
 
 If anything passes the filter, one review is chosen by mode:
@@ -53,7 +53,7 @@ If anything passes the filter, one review is chosen by mode:
 - **Random** — pick one at random from the filtered set.
 - **Shortest / longest** — pick the shortest or longest text among the filtered set.
 
-If **nothing** passes, that place is marked “exhausted” for this run so the bot does not loop on it forever.
+If **nothing** passes, that place is marked “exhausted” for a **cooldown** (default about **30 minutes**), then it can be tried again.
 
 ### Cooldown between reviews
 
@@ -86,9 +86,9 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 | **State machine** | `src/engine/state-machine.ts` — `WANDER` → `DETECT` → `DELIVER` → `RETURN`; teleports `TELEPORT`. |
 | **Orchestration** | `src/engine/bot.ts` — timers, `checkForBusiness` every 3s in wander, `onWanderStep`, effects. |
 | **Street View movement** | `src/engine/street-view-controller.ts` — `stepForward()` chooses `StreetViewLink` by `linkSelectionMode` + `wanderHeadingWobble`; `setPano`; `runHeadingMotion` for blends; `panToHeading` for detect/return; `ensureWanderFloatLoop` for optional POV sway. |
-| **Places: list nearby** | `GET /api/places` → Google **Place Nearby Search** `nearbysearch/json`, type `establishment`. |
+| **Places: list nearby** | `GET /api/places` → Nearby Search; **`lazy=1`** first page + `nextPageToken`; **`pageToken=`** for the next page. Optional merged multi-page without `lazy`. In-memory TTL cache in `src/app/api/places/` + `places-nearby-cache.ts`. |
 | **Places: reviews** | `POST /api/places` → Google **Place Details** `details/json`, `fields=name,reviews,types,geometry`. |
-| **Distances & filters** | `ReviewManager` in `src/engine/review-manager.ts` — `shouldQuery`, `fetchNearbyBusinesses`, `findNearestBusiness`, `fetchAndSelectReview`, `filterReviews`, `selectReview`. |
+| **Distances & filters** | `ReviewManager` — `shouldQuery`, `fetchNearbyBusinessesFirstPage`, `fetchNearbyNextPage`, `findNearestBusiness` (sorted candidates), `fetchAndSelectReview`, `filterReviews`, `selectReview`. |
 | **Default distances** | `src/lib/config.ts` — `PLACES.QUERY_DISTANCE_THRESHOLD`, `QUERY_MIN_INTERVAL`, `SEARCH_RADIUS`, `DETECTION_RADIUS`, `MIN_STEPS_BETWEEN_REVIEWS`; `STREET_VIEW.*`; `TIMING.*`. |
 | **Teleport / spawn** | `src/engine/teleport-manager.ts` — `getRandomSpawnCoords`, `selectDestination`, stuck detection vs `TIMING.STUCK_*`. |
 | **Configurable settings** | `src/lib/bot-settings.ts` + admin UI — wander region polygon, spawn points, timings, places radii, review modes. |
@@ -102,11 +102,17 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 | `queryDistanceThreshold` | 75 m | Min movement since last query coords to allow a new nearby fetch |
 | `queryMinInterval` | 30_000 ms | Min time between nearby fetches |
 | `minStepsBetweenReviews` | 3 | Successful `stepForward` callbacks before another detection attempt |
-| `wanderStepInterval` | 3_000 ms | Clock for periodic `stepForward` while walking |
+| `wanderStepInterval` | 15_000 ms | Clock for periodic `stepForward` while walking (default tuned to reduce imagery churn) |
 | `stuckCheckInterval` | 30_000 ms | How often stuck logic runs |
 | `stuckDistanceThreshold` | 10 m | If movement &lt; this for ~one interval → stuck teleport |
 | Review `targetRating` | 1 | Filter reviews to this star value |
 | Review length | 20–500 chars | Filter window |
+| `nearbySearchMaxPages` | 3 | Cap on lazy Nearby pages per anchor (1–3; each page is one API request) |
+| `nearbyCacheTtlMs` | 600_000 ms | Server first-page lazy cache TTL; `0` disables |
+| `MAX_PLACE_DETAILS_ATTEMPTS_PER_CHECK` | 12 | Max Place Details calls per 3s `checkForBusiness` tick |
+| `NEARBY_EXTRA_PAGE_ROUNDS_PER_CHECK` | 2 | Max extra Nearby page fetches in the same tick if no POI yields a review |
+| `reviewRepeatCooldownMinutes` | 30 | Min time before the same review text can be read again |
+| `placeRetryCooldownMinutes` | 30 | Min time before re-trying a place that had no passing review |
 
 ### Camera-related timings (defaults)
 
@@ -122,7 +128,7 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 ## Operational notes
 
 - **API key:** Nearby + Details run **server-side** with `PLACES_API_KEY` or `GEOCODING_API_KEY` (see `src/app/api/places/route.ts`). The Maps **JavaScript** key is for the client map and Street View only.
-- **Quotas & billing:** Each nearby search and each details call counts against your Google Cloud project; admin throttling reduces unnecessary repeats.
+- **Quotas & billing:** Each **page** of Nearby Search and each Details call counts against your Google Cloud project (multi-page nearby means up to three Nearby requests per refresh). Admin throttling and optional nearby cache reduce unnecessary repeats.
 - **Accuracy:** Street View position is **pano-based**; business coordinates are **Places** geometry. Bearings use `haversine`-style math in `review-manager.ts`—good enough for “face roughly toward the POI,” not survey-grade.
 
 ---

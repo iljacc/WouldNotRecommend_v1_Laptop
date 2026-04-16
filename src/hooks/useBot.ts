@@ -33,6 +33,10 @@ export interface BotUIState {
   reviewCount: number;
   sessionStartTime: number;
   teleportPhase: TeleportPhase;
+  cityTourSegmentEndTime: number;
+  nextCityLabel: string;
+  cityTourActive: boolean;
+  scheduledCityTeleportUi: boolean;
 }
 
 export function useBot() {
@@ -53,6 +57,10 @@ export function useBot() {
     reviewCount: 0,
     sessionStartTime: Date.now(),
     teleportPhase: "none",
+    cityTourSegmentEndTime: 0,
+    nextCityLabel: "",
+    cityTourActive: false,
+    scheduledCityTeleportUi: false,
   });
 
   const handleStateChange = useCallback((context: BotContext) => {
@@ -64,6 +72,10 @@ export function useBot() {
       reviewCount: context.sessionReviewCount,
       sessionStartTime: context.sessionStartTime,
       teleportPhase: context.teleportPhase,
+      cityTourSegmentEndTime: context.cityTourSegmentEndTime,
+      nextCityLabel: context.nextCityLabel,
+      cityTourActive: context.cityTourActive,
+      scheduledCityTeleportUi: context.scheduledCityTeleportUi,
     });
   }, []);
 

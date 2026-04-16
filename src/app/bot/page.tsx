@@ -12,6 +12,9 @@ import { useBot } from "@/hooks/useBot";
 
 const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 
+/** Shown behind Street View whenever the pano is not painting (loading, gaps, etc.). */
+const SV_FALLBACK_BG = "/connection-lost-bg.png";
+
 export default function BotPage() {
   const {
     containerRef,
@@ -35,10 +38,15 @@ export default function BotPage() {
   }, [isStarted, startBot]);
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-black font-mono">
+    <main className="relative h-screen w-screen overflow-hidden font-mono">
       <div
-        className="absolute inset-0 h-full w-full"
-        style={getStreetViewEffectStyle(uiState.state)}
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-[#dcdcdc] bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: `url(${SV_FALLBACK_BG})` }}
+      />
+      <div
+        className="absolute inset-0 z-[1] h-full w-full"
+        style={getStreetViewEffectStyle(uiState.state, uiState.teleportPhase)}
       >
         <StreetViewCanvas ref={containerRef} />
       </div>
@@ -54,6 +62,10 @@ export default function BotPage() {
         lifetimeReviewsTotal={lifetimeReviewsTotal}
         sessionStartTime={uiState.sessionStartTime}
         subtitle={subtitle}
+        cityTourSegmentEndTime={uiState.cityTourSegmentEndTime}
+        nextCityLabel={uiState.nextCityLabel}
+        cityTourActive={uiState.cityTourActive}
+        scheduledCityTeleportUi={uiState.scheduledCityTeleportUi}
       />
 
       <VisualEffects teleportPhase={uiState.teleportPhase} />
@@ -64,7 +76,7 @@ export default function BotPage() {
           onClick={() => {
             void startBot();
           }}
-          className="absolute inset-0 z-50 flex h-full w-full cursor-pointer items-center justify-center bg-black text-sm text-white/40 transition-colors hover:text-white/70"
+          className="absolute inset-0 z-50 flex h-full w-full cursor-pointer items-center justify-center bg-transparent text-sm text-neutral-700/90 shadow-[0_1px_12px_rgba(255,255,255,0.85)] transition-colors hover:text-neutral-900"
         >
           {error || "Click to start"}
         </button>

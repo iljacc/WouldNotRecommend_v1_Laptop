@@ -131,7 +131,7 @@ Events include `BUSINESS_DETECTED`, `DETECT_COMPLETE`, `DELIVER_COMPLETE`, `RETU
 
 ## Wander vs “many network requests”
 
-- **Application steps:** `startWalking` uses `setInterval` to call `stepForward()` at **`wanderStepInterval`** (default **3s** from config unless overridden by bot settings) — not per-frame navigation.
+- **Application steps:** `startWalking` uses `setInterval` to call `stepForward()` at **`wanderStepInterval`** (default **15s** from config unless overridden by bot settings) — not per-frame navigation.
 - **Street View imagery:** Google’s viewer loads tiles/CDN assets (`streetviewpixels`, `ggpht.com`, etc.). **`setPov` at ~60 Hz** when **wander look float** is enabled can stress imagery; 429s are often **imagery/CDN throttling**, not your Places API call rate. Tuning: `wanderLookFloatEnabled` / sway in bot settings or `STREET_VIEW` defaults in `src/lib/config.ts`.
 
 ---

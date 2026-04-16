@@ -6,6 +6,8 @@ import { BotState, type BotMode } from "@/lib/types";
 interface Props {
   mode: BotMode;
   state: BotState;
+  /** Purple ellipsis pulse only for scheduled city-tour teleports. */
+  cityTourTeleportBlink: boolean;
 }
 
 /** Magnifier only while wandering; lines during TTS; ellipsis (…) for DETECT / RETURN / TELEPORT / etc. */
@@ -74,21 +76,25 @@ function EllipsisGlyph() {
   );
 }
 
-export function ModePulseGlyph({ mode, state }: Props) {
-  const kind = glyphKind(state);
+export function ModePulseGlyph({ mode, state, cityTourTeleportBlink }: Props) {
+  const kind = cityTourTeleportBlink ? "dot" : glyphKind(state);
   const cycle =
-    kind === "search"
-      ? PULSING_DOT.SEARCHING_CYCLE
-      : kind === "text"
-        ? PULSING_DOT.PROCESSING_CYCLE
-        : mode === "Searching"
-          ? PULSING_DOT.SEARCHING_CYCLE
-          : PULSING_DOT.PROCESSING_CYCLE;
+    cityTourTeleportBlink
+      ? 5_000
+      : kind === "search"
+        ? PULSING_DOT.SEARCHING_CYCLE
+        : kind === "text"
+          ? PULSING_DOT.PROCESSING_CYCLE
+          : mode === "Searching"
+            ? PULSING_DOT.SEARCHING_CYCLE
+            : PULSING_DOT.PROCESSING_CYCLE;
 
   return (
     <div
       aria-hidden
-      className="flex shrink-0 items-center justify-center text-white will-change-[transform,opacity]"
+      className={`flex shrink-0 items-center justify-center will-change-[transform,opacity] ${
+        cityTourTeleportBlink ? "text-violet-400" : "text-white"
+      }`}
       style={{
         width: PULSING_DOT.SIZE,
         height: PULSING_DOT.SIZE,

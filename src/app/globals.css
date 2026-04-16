@@ -8,11 +8,12 @@
 
 html,
 body {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  min-height: 100vh;
   margin: 0;
   padding: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--background);
   color: var(--foreground);
 }
@@ -64,4 +65,19 @@ a[href*="google.com/maps"] {
     opacity: 1;
     transform: scale(1.28);
   }
+}
+
+@keyframes teleport-mode-flash {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.teleport-mode-flash {
+  animation: teleport-mode-flash 1.1s ease-in-out infinite;
 }

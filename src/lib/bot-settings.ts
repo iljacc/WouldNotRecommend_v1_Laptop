@@ -54,12 +54,20 @@ export interface BotPlacesSettings {
   searchRadius: number;
   detectionRadius: number;
   minStepsBetweenReviews: number;
+  /** Nearby Search pages per refresh (1–3); each page is a separate API request. */
+  nearbySearchMaxPages: number;
+  /** Server merged-result cache TTL (ms); 0 disables. */
+  nearbyCacheTtlMs: number;
 }
 
 export interface BotReviewsSettings {
   minLength: number;
   maxLength: number;
   targetRating: number;
+  /** Same review text may be read again after this many minutes. */
+  reviewRepeatCooldownMinutes: number;
+  /** Retry a place with no passing review after this many minutes. */
+  placeRetryCooldownMinutes: number;
 }
 
 export interface BotStreetViewSettings {
@@ -117,6 +125,8 @@ function defaultPlaces(): BotPlacesSettings {
     searchRadius: PLACES.SEARCH_RADIUS,
     detectionRadius: PLACES.DETECTION_RADIUS,
     minStepsBetweenReviews: PLACES.MIN_STEPS_BETWEEN_REVIEWS,
+    nearbySearchMaxPages: PLACES.NEARBY_SEARCH_MAX_PAGES,
+    nearbyCacheTtlMs: PLACES.NEARBY_CACHE_TTL_MS,
   };
 }
 
@@ -125,6 +135,8 @@ function defaultReviews(): BotReviewsSettings {
     minLength: REVIEWS.MIN_LENGTH,
     maxLength: REVIEWS.MAX_LENGTH,
     targetRating: REVIEWS.TARGET_RATING,
+    reviewRepeatCooldownMinutes: REVIEWS.REVIEW_REPEAT_COOLDOWN_MINUTES,
+    placeRetryCooldownMinutes: REVIEWS.PLACE_RETRY_COOLDOWN_MINUTES,
   };
 }
 

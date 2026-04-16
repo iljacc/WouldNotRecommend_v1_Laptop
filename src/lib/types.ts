@@ -7,7 +7,7 @@ export enum BotState {
 }
 
 export type BotMode = "Searching" | "Processing";
-/** No solid black frame — only brief dim during reposition. */
+/** Full-frame teleport: dim → near-black overlay + blur, then ease out on fade-in. */
 export type TeleportPhase = "none" | "fade-out" | "warp" | "fade-in";
 
 export function stateToMode(state: BotState): BotMode {
@@ -35,6 +35,17 @@ export interface BotContext {
   teleportPhase: TeleportPhase;
   currentCoords: LatLng;
   currentCity: string;
+  /** When city tour is active, countdown ends at this time (epoch ms). */
+  cityTourSegmentEndTime: number;
+  /** Next stop label from `city-tour.json` (empty if tour off or no data). */
+  nextCityLabel: string;
+  /** True when `NEXT_PUBLIC_CITY_TOUR` is not false and tour data exists. */
+  cityTourActive: boolean;
+  /**
+   * True only during a **scheduled city-tour** teleport (fade-out → fade-in).
+   * Recovery teleports (stuck / imagery) keep Searching/Processing in the HUD.
+   */
+  scheduledCityTeleportUi: boolean;
   targetBusiness: DetectedBusiness | null;
   reviewToRead: Review | null;
   sessionReviewCount: number;
@@ -42,7 +53,8 @@ export interface BotContext {
   /** Legacy field kept for logging; cooldown is step-based (`stepsSinceLastReview`). */
   lastReviewTime: number;
   lastQueryCoords: LatLng | null;
-  readReviewHashes: Set<string>;
+  /** Review text hash → epoch ms when last read; same text may repeat after cooldown. */
+  readReviewAtByHash: Map<string, number>;
   stuckCheckTimestamp: number;
   stuckCheckCoords: LatLng | null;
   /** Heading (deg) along the road before panning toward a business. */
@@ -69,6 +81,9 @@ export interface DetectedBusiness {
   types: string[];
   bearing: number;
   distance: number;
+  /** From Nearby Search when available — used to prefer lower-rated POIs for 1★ hunt. */
+  rating?: number;
+  totalRatings?: number;
 }
 
 export interface Review {

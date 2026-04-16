@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PLACES } from "@/lib/config";
+import {
+  getNearbyLazyFirstPage,
+  getNearbyLazyNextPage,
+  getNearbyPlacesWithCache,
+} from "./nearby-fetch";
 
 const API_KEY =
   process.env.PLACES_API_KEY || process.env.GEOCODING_API_KEY;
-
-type NearbyPlace = {
-  place_id: string;
-  name: string;
-  geometry: { location: { lat: number; lng: number } };
-  types?: string[];
-  rating?: number;
-  user_ratings_total?: number;
-};
 
 type PlaceReview = {
   text?: string;
@@ -28,48 +25,76 @@ export async function GET(request: NextRequest) {
   const lat = searchParams.get("lat");
   const lng = searchParams.get("lng");
   const radius = searchParams.get("radius") || "200";
+  const maxPagesRaw = searchParams.get("maxPages");
+  const cacheTtlRaw = searchParams.get("cacheTtlMs");
+  const lazy =
+    searchParams.get("lazy") === "1" || searchParams.get("lazy") === "true";
+  const pageTokenParam =
+    searchParams.get("pageToken") ?? searchParams.get("pagetoken");
 
-  if (!lat || !lng) {
-    return NextResponse.json({ error: "lat and lng required", places: [] }, { status: 400 });
-  }
+  const maxPages = maxPagesRaw
+    ? Math.min(3, Math.max(1, parseInt(maxPagesRaw, 10) || PLACES.NEARBY_SEARCH_MAX_PAGES))
+    : PLACES.NEARBY_SEARCH_MAX_PAGES;
+  const cacheTtlMs = cacheTtlRaw
+    ? Math.max(0, parseInt(cacheTtlRaw, 10) || 0)
+    : PLACES.NEARBY_CACHE_TTL_MS;
 
   try {
-    const nearbyUrl = new URL(
-      "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
-    );
-    nearbyUrl.searchParams.set("location", `${lat},${lng}`);
-    nearbyUrl.searchParams.set("radius", radius);
-    nearbyUrl.searchParams.set("type", "establishment");
-    nearbyUrl.searchParams.set("key", API_KEY);
-
-    const nearbyRes = await fetch(nearbyUrl.toString());
-    const nearbyData = await nearbyRes.json();
-
-    if (nearbyData.status !== "OK" && nearbyData.status !== "ZERO_RESULTS") {
-      console.error(
-        "Places API error:",
-        nearbyData.status,
-        nearbyData.error_message,
-      );
-      return NextResponse.json({ error: nearbyData.status, places: [] });
+    if (pageTokenParam) {
+      const { places, nextPageToken, error } = await getNearbyLazyNextPage({
+        pageToken: pageTokenParam,
+        apiKey: API_KEY,
+      });
+      if (error) {
+        console.error("Places API error (lazy next):", error);
+        return NextResponse.json({ error, places, nextPageToken: null });
+      }
+      return NextResponse.json({ places, nextPageToken });
     }
 
-    const places = ((nearbyData.results || []) as NearbyPlace[]).map((place) => ({
-      placeId: place.place_id,
-      name: place.name,
-      location: {
-        lat: place.geometry.location.lat,
-        lng: place.geometry.location.lng,
-      },
-      types: place.types || [],
-      rating: place.rating,
-      totalRatings: place.user_ratings_total,
-    }));
+    if (lazy) {
+      if (!lat || !lng) {
+        return NextResponse.json(
+          { error: "lat and lng required", places: [], nextPageToken: null },
+          { status: 400 },
+        );
+      }
+      const { places, nextPageToken, error } = await getNearbyLazyFirstPage({
+        lat,
+        lng,
+        radius,
+        apiKey: API_KEY,
+        cacheTtlMs,
+      });
+      if (error) {
+        console.error("Places API error (lazy first):", error);
+        return NextResponse.json({ error, places, nextPageToken: null });
+      }
+      return NextResponse.json({ places, nextPageToken });
+    }
+
+    if (!lat || !lng) {
+      return NextResponse.json({ error: "lat and lng required", places: [] }, { status: 400 });
+    }
+
+    const { places, error } = await getNearbyPlacesWithCache({
+      lat,
+      lng,
+      radius,
+      apiKey: API_KEY,
+      maxPages,
+      cacheTtlMs,
+    });
+
+    if (error) {
+      console.error("Places API error:", error);
+      return NextResponse.json({ error, places });
+    }
 
     return NextResponse.json({ places });
   } catch (error) {
     console.error("Places fetch error:", error);
-    return NextResponse.json({ error: "Fetch failed", places: [] }, { status: 500 });
+    return NextResponse.json({ error: "Fetch failed", places: [] });
   }
 }
 
@@ -115,6 +140,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Place details fetch error:", error);
-    return NextResponse.json({ error: "Fetch failed", reviews: [] }, { status: 500 });
+    return NextResponse.json({ error: "Fetch failed", reviews: [] });
   }
 }

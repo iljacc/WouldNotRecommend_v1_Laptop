@@ -1,5 +1,9 @@
 import destinations from "../../data/teleport-destinations.json";
 import { getBotSettings, isLatLngInWanderRegion } from "@/lib/bot-settings";
+import {
+  randomLatLngInWanderRegion,
+  randomLatLngOffsetMeters,
+} from "@/lib/wander-geo";
 import type { LatLng } from "@/lib/types";
 import { haversineDistance } from "./review-manager";
 
@@ -8,6 +12,11 @@ interface TeleportDestination {
   lng: number;
   label: string;
 }
+
+/** When the curated city tour is active, keep recovery spawns near this anchor (not Den Haag JSON). */
+export type TeleportHint = {
+  cityAnchor?: LatLng;
+};
 
 export class TeleportManager {
   private readonly destinationsList: TeleportDestination[] = destinations;
@@ -23,11 +32,11 @@ export class TeleportManager {
 
   private destinationPool(): TeleportDestination[] {
     const filtered = this.filteredDestinations();
-    return filtered.length > 0 ? filtered : this.destinationsList;
+    return filtered;
   }
 
   /** Random commercial spawn in wander region (Street View resolves nearest pano). */
-  getRandomSpawnCoords(): LatLng {
+  getRandomSpawnCoords(hint?: TeleportHint): LatLng {
     const settings = getBotSettings();
     const custom = settings.customSpawnPoints ?? [];
     if (custom.length > 0) {
@@ -39,13 +48,27 @@ export class TeleportManager {
       const pick = pool[Math.floor(Math.random() * pool.length)];
       return { lat: pick.lat, lng: pick.lng };
     }
-    const pool = this.destinationPool();
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    return { lat: pick.lat, lng: pick.lng };
+    if (hint?.cityAnchor) {
+      return randomLatLngOffsetMeters(hint.cityAnchor, 45, 380);
+    }
+    const jsonPool = this.destinationPool();
+    if (jsonPool.length > 0) {
+      const pick = jsonPool[Math.floor(Math.random() * jsonPool.length)];
+      return { lat: pick.lat, lng: pick.lng };
+    }
+    return randomLatLngInWanderRegion(settings.wanderRegion);
   }
 
   /** Pick a random destination, avoiding immediate repeats when possible. */
-  selectDestination(currentCoords: LatLng): LatLng {
+  selectDestination(currentCoords: LatLng, hint?: TeleportHint): LatLng {
+    if (hint?.cityAnchor) {
+      for (let attempt = 0; attempt < 14; attempt++) {
+        const p = randomLatLngOffsetMeters(hint.cityAnchor, 35, 450);
+        if (haversineDistance(currentCoords, p) > 22) return p;
+      }
+      return randomLatLngOffsetMeters(hint.cityAnchor, 90, 520);
+    }
+
     let pool = [...this.destinationPool()];
     if (pool.length > 1) {
       pool = pool.filter(
@@ -55,8 +78,17 @@ export class TeleportManager {
         pool = [...this.destinationPool()];
       }
     }
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    return { lat: pick.lat, lng: pick.lng };
+    if (pool.length > 0) {
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      return { lat: pick.lat, lng: pick.lng };
+    }
+
+    const region = getBotSettings().wanderRegion;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const p = randomLatLngInWanderRegion(region);
+      if (haversineDistance(currentCoords, p) > 18) return p;
+    }
+    return randomLatLngOffsetMeters(currentCoords, 120, 650);
   }
 
   updateStuckCheck(currentCoords: LatLng): void {

@@ -11,10 +11,12 @@ export const TIMING = {
   RETURN_PAN_DURATION: 3_800,
   /** RETURN state timer — must run slightly longer than the pan animation so we never snap early. */
   RETURN_STATE_TIMER_MS: 4_050,
-  WANDER_STEP_INTERVAL: 3_000,
-  TELEPORT_FADE_OUT: 600,
-  TELEPORT_HOLD_DIM: 0,
-  TELEPORT_FADE_IN: 600,
+  /** Ms between wander steps (new pano). 15s default to reduce Street View tile / ggpht churn (429s); override in admin. */
+  WANDER_STEP_INTERVAL: 15_000,
+  /** Full teleport sequence ≈ sum of three (ms); imagery_fault uses shorter fades in bot. */
+  TELEPORT_FADE_OUT: 2_000,
+  TELEPORT_HOLD_DIM: 1_000,
+  TELEPORT_FADE_IN: 2_000,
   AUDIO_CROSSFADE: 4_000,
   STUCK_CHECK_INTERVAL: 30_000,
   STUCK_DISTANCE_THRESHOLD: 10,
@@ -51,12 +53,30 @@ export const PLACES = {
   DETECTION_RADIUS: 150,
   /** Must take this many successful wander steps after a review before another detect. */
   MIN_STEPS_BETWEEN_REVIEWS: 3,
+  /** Nearby Search pages (1–3); each page is a separate API request (max ~20 POIs per page). */
+  NEARBY_SEARCH_MAX_PAGES: 3,
+  /** Server-side merged-result cache TTL (ms); 0 disables. */
+  NEARBY_CACHE_TTL_MS: 10 * 60 * 1000,
+  /**
+   * Per `checkForBusiness` tick: try up to this many Place Details (nearest candidates)
+   * before waiting for the next interval.
+   */
+  MAX_PLACE_DETAILS_ATTEMPTS_PER_CHECK: 12,
+  /**
+   * After exhausting Details attempts on the current Nearby list, fetch at most this many
+   * extra Nearby pages (lazy pagination) in the same tick.
+   */
+  NEARBY_EXTRA_PAGE_ROUNDS_PER_CHECK: 2,
 } as const;
 
 export const REVIEWS = {
   MIN_LENGTH: 20,
   MAX_LENGTH: 500,
   TARGET_RATING: 1,
+  /** Same review text may be read again after this many minutes (installation turnover). */
+  REVIEW_REPEAT_COOLDOWN_MINUTES: 30,
+  /** Retry a place that had no passing review after this many minutes. */
+  PLACE_RETRY_COOLDOWN_MINUTES: 30,
 } as const;
 
 export const STREET_VIEW = {
@@ -67,9 +87,10 @@ export const STREET_VIEW = {
   STEP_HEADING_BLEND_MS: 520,
   /**
    * While walking, add a gentle camera sway around the travel heading (POV only).
-   * Set `false` to revert to a locked-forward view.
+   * Off by default: `setPov` every animation frame can stress Google imagery/CDN (429s).
+   * Enable in admin after tuning. Saved `localStorage` overrides — clear or toggle to test.
    */
-  WANDER_LOOK_FLOAT_ENABLED: true,
+  WANDER_LOOK_FLOAT_ENABLED: false,
   /** Max yaw sway (deg) — stays “mostly forward” along the path. */
   WANDER_LOOK_SWAY_DEG: 9,
   /** Subtle pitch sway (deg) for a bit of float. */
@@ -89,12 +110,15 @@ export const VISUAL = {
   COLOR_TRANSITION: 3_000,
 } as const;
 
+/** Levels are +25% vs earlier defaults; TTS is routed through Web Audio into the same master as ambient/SFX. */
 export const AUDIO = {
-  MASTER_VOLUME: 0.7,
-  AMBIENT_SEARCHING_VOLUME: 0.3,
-  AMBIENT_PROCESSING_VOLUME: 0.25,
-  AMBIENT_DELIVER_VOLUME: 0.08,
-  SFX_VOLUME: 0.4,
+  MASTER_VOLUME: 0.875,
+  AMBIENT_SEARCHING_VOLUME: 0.375,
+  AMBIENT_PROCESSING_VOLUME: 0.3125,
+  AMBIENT_DELIVER_VOLUME: 0.1,
+  SFX_VOLUME: 0.5,
+  /** Gain for Piper (and other buffered speech) before the master. */
+  TTS_VOLUME: 0.2,
 } as const;
 
 export const PULSING_DOT = {
@@ -104,13 +128,18 @@ export const PULSING_DOT = {
   PROCESSING_CYCLE: 1_000,
 } as const;
 
-/** Centroid of Den Haag commercial spawns (see `data/teleport-destinations.json`). */
+/** Placeholder coords until `Bot.start()` sets the real spawn (not city-specific). */
 export const DEFAULT_START: LatLng = {
   lat: 52.075,
   lng: 4.312,
 };
 
 /** Bot page-only toggles (build-time `NEXT_PUBLIC_*`). */
+/** Curated city rotation (`data/city-tour.json`). Set `NEXT_PUBLIC_CITY_TOUR=false` to disable. */
+export const CITY_TOUR = {
+  SEGMENT_MS: 600_000,
+} as const;
+
 export const BOT_PAGE = {
   /**
    * Three.js CCTV-style overlay on Street View. Off by default — set

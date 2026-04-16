@@ -9,6 +9,7 @@ type ToneDirection = "ascending" | "descending";
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private ttsGain: GainNode | null = null;
   private ambientAGain: GainNode | null = null;
   private ambientBGain: GainNode | null = null;
   private ambientASource: AudioBufferSourceNode | null = null;
@@ -19,6 +20,8 @@ export class AudioEngine {
   private bloopBuffer: AudioBuffer | null = null;
   private activeLayer: AmbientLayer = "A";
   private initialized = false;
+  private ttsSource: AudioBufferSourceNode | null = null;
+  private ttsPlayResolve: (() => void) | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -36,6 +39,10 @@ export class AudioEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = AUDIO.MASTER_VOLUME;
     this.masterGain.connect(this.ctx.destination);
+
+    this.ttsGain = this.ctx.createGain();
+    this.ttsGain.gain.value = AUDIO.TTS_VOLUME;
+    this.ttsGain.connect(this.masterGain);
 
     this.ambientAGain = this.ctx.createGain();
     this.ambientBGain = this.ctx.createGain();
@@ -55,6 +62,61 @@ export class AudioEngine {
   async resume(): Promise<void> {
     if (this.ctx?.state === "suspended") {
       await this.ctx.resume();
+    }
+  }
+
+  getAudioContext(): AudioContext | null {
+    return this.ctx;
+  }
+
+  async decodeAudioData(data: ArrayBuffer): Promise<AudioBuffer> {
+    if (!this.ctx) throw new Error("AudioContext not initialized");
+    const copy = data.slice(0);
+    return await this.ctx.decodeAudioData(copy);
+  }
+
+  playTtsBuffer(
+    buffer: AudioBuffer,
+    onStarted?: (contextTime: number) => void,
+  ): Promise<void> {
+    this.stopTtsPlayback();
+    if (!this.ctx || !this.ttsGain) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      const source = this.ctx!.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.ttsGain!);
+      this.ttsSource = source;
+      this.ttsPlayResolve = resolve;
+      source.onended = () => {
+        if (this.ttsSource === source) {
+          this.ttsSource = null;
+        }
+        if (this.ttsPlayResolve) {
+          const r = this.ttsPlayResolve;
+          this.ttsPlayResolve = null;
+          r();
+        }
+      };
+      const startT = this.ctx!.currentTime;
+      source.start(0);
+      onStarted?.(startT);
+    });
+  }
+
+  stopTtsPlayback(): void {
+    if (this.ttsSource) {
+      try {
+        this.ttsSource.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.ttsSource = null;
+    }
+    if (this.ttsPlayResolve) {
+      const r = this.ttsPlayResolve;
+      this.ttsPlayResolve = null;
+      r();
     }
   }
 
@@ -118,6 +180,7 @@ export class AudioEngine {
   }
 
   destroy(): void {
+    this.stopTtsPlayback();
     this.ambientASource?.stop();
     this.ambientBSource?.stop();
     this.ctx?.close();

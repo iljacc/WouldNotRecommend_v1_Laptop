@@ -1,0 +1,77 @@
+[
+  {
+    "label": "Den Haag — city centre",
+    "spawnPoints": [
+      { "lat": 52.0768, "lng": 4.3125, "label": "Grote Markt / Hema" },
+      { "lat": 52.0754, "lng": 4.3108, "label": "Spuistraat shops" },
+      { "lat": 52.0749, "lng": 4.3178, "label": "Kalvermarkt retail" },
+      { "lat": 52.0732, "lng": 4.3085, "label": "Venestraat" },
+      { "lat": 52.0775, "lng": 4.3075, "label": "Noordeinde galleries" },
+      { "lat": 52.0788, "lng": 4.3142, "label": "Buitenhof / Plein" },
+      { "lat": 52.0715, "lng": 4.3225, "label": "HS / Stationsbuurt" },
+      { "lat": 52.0698, "lng": 4.3155, "label": "Turfmarkt area" },
+      { "lat": 52.0802, "lng": 4.3188, "label": "Centrum east shops" },
+      { "lat": 52.0725, "lng": 4.3045, "label": "Zoutmanstraat / west retail" }
+    ]
+  },
+  {
+    "label": "Utrecht — city centre",
+    "spawnPoints": [
+      { "lat": 52.091, "lng": 5.1208, "label": "Domplein" },
+      { "lat": 52.0924, "lng": 5.1192, "label": "Oudegracht north" },
+      { "lat": 52.0895, "lng": 5.1185, "label": "Steenweg" },
+      { "lat": 52.0888, "lng": 5.123, "label": "Neude" },
+      { "lat": 52.093, "lng": 5.1245, "label": "Binnenstad north" },
+      { "lat": 52.0915, "lng": 5.115, "label": "Vredenburg / Hoog Catharijne" },
+      { "lat": 52.0875, "lng": 5.121, "label": "Mariaplaats area" },
+      { "lat": 52.092, "lng": 5.127, "label": "Nieuwegracht east" },
+      { "lat": 52.094, "lng": 5.118, "label": "Springweg area" },
+      { "lat": 52.09, "lng": 5.1285, "label": "Wittevrouwenkade" }
+    ]
+  },
+  {
+    "label": "Amsterdam — city centre",
+    "spawnPoints": [
+      { "lat": 52.3736, "lng": 4.891, "label": "Dam / Rokin" },
+      { "lat": 52.3752, "lng": 4.8965, "label": "Nieuwmarkt" },
+      { "lat": 52.3715, "lng": 4.89, "label": "Paleis / Damrak" },
+      { "lat": 52.3698, "lng": 4.903, "label": "Rembrandtplein area" },
+      { "lat": 52.3765, "lng": 4.888, "label": "Centraal / Prins Hendrik" },
+      { "lat": 52.3675, "lng": 4.8955, "label": "Kalverstraat south" },
+      { "lat": 52.374, "lng": 4.9055, "label": "Plantage Middenlaan" },
+      { "lat": 52.378, "lng": 4.9, "label": "Haarlemmerbuurt" },
+      { "lat": 52.3705, "lng": 4.886, "label": "Singel / Jordaan edge" },
+      { "lat": 52.372, "lng": 4.908, "label": "Weesperbuurt" }
+    ]
+  },
+  {
+    "label": "Rotterdam — city centre",
+    "spawnPoints": [
+      { "lat": 51.925, "lng": 4.4795, "label": "Stadhuisplein / Coolsingel" },
+      { "lat": 51.922, "lng": 4.478, "label": "Beurstraverse / Koopgoot" },
+      { "lat": 51.9265, "lng": 4.475, "label": "Lijnbaan north" },
+      { "lat": 51.921, "lng": 4.482, "label": "Oude Haven" },
+      { "lat": 51.9235, "lng": 4.473, "label": "Witte de Withstraat" },
+      { "lat": 51.928, "lng": 4.481, "label": "Centraal / Weena" },
+      { "lat": 51.92, "lng": 4.477, "label": "Maritime Museum area" },
+      { "lat": 51.924, "lng": 4.488, "label": "Markthal / Laurenskerk" },
+      { "lat": 51.927, "lng": 4.47, "label": "Eendrachtsplein" },
+      { "lat": 51.9185, "lng": 4.479, "label": "Blaak / cube houses" }
+    ]
+  },
+  {
+    "label": "Eindhoven — city centre",
+    "spawnPoints": [
+      { "lat": 51.4425, "lng": 5.4675, "label": "Markt / Rechtestraat" },
+      { "lat": 51.4405, "lng": 5.472, "label": "Stratumseind" },
+      { "lat": 51.4435, "lng": 5.474, "label": "18 Septemberplein" },
+      { "lat": 51.439, "lng": 5.468, "label": "Stationsplein area" },
+      { "lat": 51.441, "lng": 5.476, "label": "Demer / centrum east" },
+      { "lat": 51.4445, "lng": 5.471, "label": "Vestdijk north" },
+      { "lat": 51.4385, "lng": 5.4745, "label": "Mathildelaan south" },
+      { "lat": 51.442, "lng": 5.464, "label": "Heuvel Galerie" },
+      { "lat": 51.445, "lng": 5.478, "label": "Dommel area" },
+      { "lat": 51.4395, "lng": 5.466, "label": "Fellenoord / station west" }
+    ]
+  }
+]

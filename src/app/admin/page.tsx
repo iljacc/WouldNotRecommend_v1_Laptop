@@ -758,6 +758,16 @@ export default function AdminPage() {
               form.places.minStepsBetweenReviews,
               (v) => patchPlaces("minStepsBetweenReviews", v),
             )}
+            {num(
+              "nearbySearchMaxPages (1–3)",
+              form.places.nearbySearchMaxPages,
+              (v) => patchPlaces("nearbySearchMaxPages", Math.min(3, Math.max(1, Math.floor(v)))),
+            )}
+            {num(
+              "nearbyCacheTtlMs (0=off)",
+              form.places.nearbyCacheTtlMs,
+              (v) => patchPlaces("nearbyCacheTtlMs", Math.max(0, Math.floor(v))),
+            )}
           </div>
         </section>
 
@@ -765,10 +775,20 @@ export default function AdminPage() {
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6d7a66]">
             Reviews filter
           </h2>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {num("minLength", form.reviews.minLength, (v) => patchReviews("minLength", v))}
             {num("maxLength", form.reviews.maxLength, (v) => patchReviews("maxLength", v))}
             {num("targetRating", form.reviews.targetRating, (v) => patchReviews("targetRating", v))}
+            {num(
+              "reviewRepeatCooldown (min)",
+              form.reviews.reviewRepeatCooldownMinutes,
+              (v) => patchReviews("reviewRepeatCooldownMinutes", Math.max(0, v)),
+            )}
+            {num(
+              "placeRetryCooldown (min)",
+              form.reviews.placeRetryCooldownMinutes,
+              (v) => patchReviews("placeRetryCooldownMinutes", Math.max(0, v)),
+            )}
           </div>
         </section>
 
@@ -851,8 +871,9 @@ export default function AdminPage() {
           </button>
         </section>
         <p className="text-xs text-[#5a6658]">
-          Soft-reset clears in-memory review hash / place caches on the running bot tab so places can be
-          re-tried. For a full session restart, reload <code className="text-[#7d8a78]">/bot</code>.
+          Soft-reset clears review read timestamps, exhausted-place markers, and nearby caches on the
+          running bot tab. For a full session restart, reload{" "}
+          <code className="text-[#7d8a78]">/bot</code>.
         </p>
       </div>
     </div>
