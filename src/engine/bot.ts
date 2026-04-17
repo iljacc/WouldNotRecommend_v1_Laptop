@@ -6,7 +6,14 @@ import {
   reloadBotSettingsFromStorage,
   subscribeBotSettings,
 } from "@/lib/bot-settings";
-import { DEFAULT_START, PLACES, SUBTITLE_TIMING } from "@/lib/config";
+import {
+  DEFAULT_START,
+  MAPS_CDN,
+  PLACES,
+  SUBTITLE_TIMING,
+  TIMING,
+} from "@/lib/config";
+import { startMapsImageryCdnErrorMonitor } from "@/lib/maps-cdn-stress";
 import {
   BotState,
   stateToMode,
@@ -66,6 +73,13 @@ export class Bot {
   /** Avoid duplicate STATE lines; WANDER is not logged here (use SEARCHING per step). */
   private lastActivityBroadcastState: BotState | null = null;
   private unsubscribeSettings: (() => void) | null = null;
+  /** From admin / `wanderStepInterval`; updated on settings reload. */
+  private baseWanderStepMs: number = TIMING.WANDER_STEP_INTERVAL;
+  /** True while Maps tile CDN burst backoff is active. */
+  private mapsCdnStressBackoff = false;
+  /** Browser timeout handle (`use client` — DOM `number`, not Node `Timeout`). */
+  private mapsStressRecoveryTimer: number | null = null;
+  private stopMapsCdnMonitor: (() => void) | null = null;
   /** Session city from spawn geocode only; kept across teleports within the run. */
   private sessionCityResolved = false;
   /** Set immediately before `TELEPORT_TRIGGERED` when advancing the curated city tour. */
@@ -122,8 +136,12 @@ export class Bot {
 
     this.running = true;
     reloadBotSettingsFromStorage();
+    this.syncBaseWanderStepFromSettings();
     this.audio.startAmbient();
-    this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
+    this.streetView.startWalking(this.getEffectiveWanderStepInterval());
+    this.stopMapsCdnMonitor = startMapsImageryCdnErrorMonitor(() =>
+      this.onMapsCdnStressBurst(),
+    );
     this.startPeriodicChecks();
     this.unsubscribeSettings = subscribeBotSettings(
       () => this.applySettingsHotReload(),
@@ -144,6 +162,9 @@ export class Bot {
     this.running = false;
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
+    this.stopMapsCdnMonitor?.();
+    this.stopMapsCdnMonitor = null;
+    this.clearMapsStressRecoveryTimer();
     if (this.subtitleHideTimer) {
       clearTimeout(this.subtitleHideTimer);
       this.subtitleHideTimer = null;
@@ -264,7 +285,7 @@ export class Bot {
   ): void {
     switch (effect.type) {
       case "START_WALKING":
-        this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
+        this.streetView.startWalking(this.getEffectiveWanderStepInterval());
         postActivity("WALK", [
           `${this.startWalkingReason(event)} | ${this.activityLocationFragment()}`,
         ]);
@@ -415,11 +436,49 @@ export class Bot {
 
   private applySettingsHotReload(): void {
     if (!this.running) return;
+    this.syncBaseWanderStepFromSettings();
     this.restartStuckAndStatsIntervals();
     if (this.context.state === BotState.WANDER) {
       this.streetView.stopWalking();
-      this.streetView.startWalking(getBotSettings().timing.wanderStepInterval);
+      this.streetView.startWalking(this.getEffectiveWanderStepInterval());
     }
+  }
+
+  private syncBaseWanderStepFromSettings(): void {
+    this.baseWanderStepMs = getBotSettings().timing.wanderStepInterval;
+  }
+
+  private getEffectiveWanderStepInterval(): number {
+    const base = this.baseWanderStepMs;
+    if (!this.mapsCdnStressBackoff) return base;
+    return Math.max(base, MAPS_CDN.STRESS_MIN_WANDER_INTERVAL_MS);
+  }
+
+  private clearMapsStressRecoveryTimer(): void {
+    if (this.mapsStressRecoveryTimer !== null) {
+      clearTimeout(this.mapsStressRecoveryTimer);
+      this.mapsStressRecoveryTimer = null;
+    }
+  }
+
+  private onMapsCdnStressBurst(): void {
+    if (!this.running) return;
+    this.clearMapsStressRecoveryTimer();
+    this.mapsCdnStressBackoff = true;
+    const ms = this.getEffectiveWanderStepInterval();
+    if (this.context.state === BotState.WANDER) {
+      this.streetView.setWalkingInterval(ms);
+    }
+    postActivity("MAPS", [
+      `tile/CDN burst — wander ${ms}ms (stress floor ${MAPS_CDN.STRESS_MIN_WANDER_INTERVAL_MS}ms)`,
+    ]);
+    this.mapsStressRecoveryTimer = window.setTimeout(() => {
+      this.mapsStressRecoveryTimer = null;
+      this.mapsCdnStressBackoff = false;
+      if (this.running && this.context.state === BotState.WANDER) {
+        this.streetView.setWalkingInterval(this.getEffectiveWanderStepInterval());
+      }
+    }, MAPS_CDN.STRESS_RECOVERY_QUIET_MS);
   }
 
   private applySoftReset(): void {

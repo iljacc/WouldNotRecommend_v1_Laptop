@@ -23,6 +23,27 @@ export const TIMING = {
   STATS_UPDATE_INTERVAL: 30_000,
 } as const;
 
+/**
+ * Maps JS tile / Street View CDN: when many 502/503/504 responses are observed
+ * (via Performance Resource Timing), the bot temporarily enforces a longer
+ * wander step interval — see `MAPS_CDN.STRESS_MIN_WANDER_INTERVAL_MS`.
+ */
+export const MAPS_CDN = {
+  /** Rolling window (ms) for counting Maps tile imagery error responses. */
+  ERROR_BURST_WINDOW_MS: 10_000,
+  /** Min error responses in the window to trigger wander backoff. */
+  ERROR_BURST_THRESHOLD: 5,
+  /** After a burst, ignore further burst callbacks for this long (ms). */
+  BURST_COOLDOWN_MS: 4_000,
+  /**
+   * While backoff is active, enforce at least this many ms between wander steps
+   * (unless the admin base interval is already higher).
+   */
+  STRESS_MIN_WANDER_INTERVAL_MS: 22_000,
+  /** After this long with no new burst, restore the configured wander interval. */
+  STRESS_RECOVERY_QUIET_MS: 90_000,
+} as const;
+
 /** After typewriter completes: linger, then CSS fade in `TtsSubtitles`; bot clears after both (keep in sync). */
 export const SUBTITLE_TIMING = {
   LINGER_AFTER_COMPLETE_MS: 12_000,

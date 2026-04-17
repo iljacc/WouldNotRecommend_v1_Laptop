@@ -443,6 +443,17 @@ export class StreetViewController {
     this.ensureWanderFloatLoop();
   }
 
+  /** Updates the wander clock without stopping float / moving state. No-op if not walking. */
+  setWalkingInterval(intervalMs: number): void {
+    if (!this.isMoving) return;
+    if (this.moveInterval !== null) {
+      window.clearInterval(this.moveInterval);
+    }
+    this.moveInterval = window.setInterval(() => {
+      this.stepForward();
+    }, intervalMs);
+  }
+
   stopWalking(): void {
     this.isMoving = false;
     if (this.moveInterval !== null) {

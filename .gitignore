@@ -31,3 +31,4 @@ data/screenshots/
 
 # System
 .DS_Store
+/docs/art-demos
