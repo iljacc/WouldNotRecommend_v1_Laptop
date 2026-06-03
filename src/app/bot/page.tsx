@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CctvOverlayLayer } from "@/components/CctvOverlayLayer";
 import { HUD } from "@/components/HUD";
 import { StreetViewCanvas } from "@/components/StreetViewCanvas";
@@ -9,6 +9,11 @@ import {
   VisualEffects,
 } from "@/components/VisualEffects";
 import { useBot } from "@/hooks/useBot";
+import {
+  getBotSettings,
+  subscribeBotSettings,
+  type BotStreetViewSettings,
+} from "@/lib/bot-settings";
 
 const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 
@@ -16,6 +21,8 @@ const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 const SV_FALLBACK_BG = "/connection-lost-bg.png";
 
 export default function BotPage() {
+  const [streetViewSettings, setStreetViewSettings] =
+    useState<BotStreetViewSettings>(() => getBotSettings().streetView);
   const {
     containerRef,
     uiState,
@@ -37,6 +44,12 @@ export default function BotPage() {
     return () => window.clearTimeout(timer);
   }, [isStarted, startBot]);
 
+  useEffect(() => {
+    return subscribeBotSettings(() => {
+      setStreetViewSettings(getBotSettings().streetView);
+    });
+  }, []);
+
   return (
     <main className="relative h-screen w-screen overflow-hidden font-mono">
       <div
@@ -46,7 +59,11 @@ export default function BotPage() {
       />
       <div
         className="absolute inset-0 z-[1] h-full w-full"
-        style={getStreetViewEffectStyle(uiState.state, uiState.teleportPhase)}
+        style={getStreetViewEffectStyle(
+          uiState.state,
+          uiState.teleportPhase,
+          streetViewSettings,
+        )}
       >
         <StreetViewCanvas ref={containerRef} />
       </div>

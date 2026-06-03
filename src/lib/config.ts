@@ -50,12 +50,12 @@ export const SUBTITLE_TIMING = {
   FADE_OUT_MS: 1_200,
 } as const;
 
-/** Den Haag retail / city-centre crawl bounds (commercial shopping areas). */
+/** Den Haag crawl bounds: ~700 m around 52.078102, 4.314051. */
 export const HAGUE_REGION = {
-  minLat: 52.065,
-  maxLat: 52.082,
-  minLng: 4.295,
-  maxLng: 4.33,
+  minLat: 52.071814,
+  maxLat: 52.08439,
+  minLng: 4.303831,
+  maxLng: 4.324271,
 } as const;
 
 export function isLatLngInHagueRegion(coords: LatLng): boolean {
@@ -70,8 +70,8 @@ export function isLatLngInHagueRegion(coords: LatLng): boolean {
 export const PLACES = {
   QUERY_DISTANCE_THRESHOLD: 75,
   QUERY_MIN_INTERVAL: 30_000,
-  SEARCH_RADIUS: 200,
-  DETECTION_RADIUS: 150,
+  SEARCH_RADIUS: 700,
+  DETECTION_RADIUS: 700,
   /** Must take this many successful wander steps after a review before another detect. */
   MIN_STEPS_BETWEEN_REVIEWS: 3,
   /** Nearby Search pages (1–3); each page is a separate API request (max ~20 POIs per page). */
@@ -94,10 +94,10 @@ export const REVIEWS = {
   MIN_LENGTH: 20,
   MAX_LENGTH: 500,
   TARGET_RATING: 1,
-  /** Same review text may be read again after this many minutes (installation turnover). */
-  REVIEW_REPEAT_COOLDOWN_MINUTES: 30,
-  /** Retry a place that had no passing review after this many minutes. */
-  PLACE_RETRY_COOLDOWN_MINUTES: 30,
+  /** Same review text may be read again after this many minutes. */
+  REVIEW_REPEAT_COOLDOWN_MINUTES: 180,
+  /** Retry a place that had no currently passing review after this many minutes. */
+  PLACE_RETRY_COOLDOWN_MINUTES: 5,
 } as const;
 
 export const STREET_VIEW = {
@@ -107,8 +107,8 @@ export const STREET_VIEW = {
   /** After each wander step, blend POV to the link heading (reduces snap). */
   STEP_HEADING_BLEND_MS: 520,
   /**
-   * While walking, add a gentle camera sway around the travel heading (POV only).
-   * Off by default: `setPov` every animation frame can stress Google imagery/CDN (429s).
+   * While walking, add a gentle visual drift to the Street View layer.
+   * CSS-only by default; real per-frame `setPov` is avoided to reduce Google imagery/CDN churn.
    * Enable in admin after tuning. Saved `localStorage` overrides — clear or toggle to test.
    */
   WANDER_LOOK_FLOAT_ENABLED: false,
@@ -151,8 +151,8 @@ export const PULSING_DOT = {
 
 /** Placeholder coords until `Bot.start()` sets the real spawn (not city-specific). */
 export const DEFAULT_START: LatLng = {
-  lat: 52.075,
-  lng: 4.312,
+  lat: 52.078102,
+  lng: 4.314051,
 };
 
 /** Bot page-only toggles (build-time `NEXT_PUBLIC_*`). */

@@ -33,7 +33,7 @@ export type StreetViewControllerOptions = {
 
 export class StreetViewController {
   private panorama: google.maps.StreetViewPanorama | null = null;
-  /** Navigation / walk direction (deg). POV may add a wander-only sway on top. */
+  /** Navigation / walk direction (deg). CSS may add a wander-only visual drift on top. */
   private currentHeading = 0;
   private isMoving = false;
   private moveInterval: number | null = null;
@@ -46,14 +46,14 @@ export class StreetViewController {
   private panoChangedAt = 0;
   /** Bumps to cancel in-flight heading animations (pans + step blends). */
   private headingMotionGeneration = 0;
-  /** True while `runHeadingMotion` drives POV (pans / step blends); wander float is paused. */
+  /** True while `runHeadingMotion` drives POV (pans / step blends). */
   private headingMotionInProgress = false;
-  /** Extra yaw/pitch applied only while walking + float enabled (not used for link picking). */
-  private wanderLookOffsetDeg = 0;
-  private wanderPitchOffsetDeg = 0;
-  private wanderFloatPhase = Math.random() * Math.PI * 2;
-  private wanderFloatRafId: number | null = null;
-  private wanderFloatLoopRunning = false;
+  /**
+   * Wander look float is intentionally handled as a CSS transform on the
+   * Street View layer. Calling `setPov` every frame can trigger extra imagery
+   * tile churn in Google's viewer; this controller only drives real POV for
+   * navigational steps and scripted pans.
+   */
 
   async init(
     container: HTMLElement,
@@ -74,8 +74,6 @@ export class StreetViewController {
     });
 
     await loader.importLibrary("streetView");
-
-    this.wanderFloatPhase = Math.random() * Math.PI * 2;
 
     if (streetViewStart) {
       this.currentHeading = streetViewStart.heading;
@@ -192,67 +190,6 @@ export class StreetViewController {
     });
   }
 
-  /** POV with optional wander float (only when walking and not in a heading animation). */
-  private applyWanderPovWithFloat(): void {
-    if (!this.panorama || !this.isImageryRenderable()) return;
-    const sv = getBotSettings().streetView;
-    if (!sv.wanderLookFloatEnabled) {
-      this.applyNavPovOnly();
-      return;
-    }
-    const h = (this.currentHeading + this.wanderLookOffsetDeg + 360) % 360;
-    const p = sv.pitch + this.wanderPitchOffsetDeg;
-    this.panorama.setPov({ heading: h, pitch: p });
-  }
-
-  private ensureWanderFloatLoop(): void {
-    if (!getBotSettings().streetView.wanderLookFloatEnabled) return;
-    if (this.wanderFloatLoopRunning) return;
-    this.wanderFloatLoopRunning = true;
-
-    const loop = (): void => {
-      this.wanderFloatRafId = null;
-
-      if (!this.isMoving || !this.panorama) {
-        this.wanderFloatLoopRunning = false;
-        return;
-      }
-
-      if (!this.headingMotionInProgress && this.isImageryRenderable()) {
-        const sv = getBotSettings().streetView;
-        const t = performance.now() * 0.001;
-        const k = sv.wanderLookDrift;
-        const phase = this.wanderFloatPhase;
-        const sway = sv.wanderLookSwayDeg;
-        const psway = sv.wanderLookPitchSwayDeg;
-
-        this.wanderLookOffsetDeg =
-          sway *
-          (0.52 * Math.sin(t * k * 1.0 + phase) +
-            0.33 * Math.sin(t * k * 0.67 + phase * 1.7) +
-            0.15 * Math.sin(t * k * 2.05 + phase * 0.4));
-
-        this.wanderPitchOffsetDeg = psway * Math.sin(t * k * 0.55 + phase * 0.35);
-
-        this.applyWanderPovWithFloat();
-      }
-
-      this.wanderFloatRafId = window.requestAnimationFrame(loop);
-    };
-
-    this.wanderFloatRafId = window.requestAnimationFrame(loop);
-  }
-
-  private stopWanderFloatLoop(): void {
-    if (this.wanderFloatRafId !== null) {
-      window.cancelAnimationFrame(this.wanderFloatRafId);
-      this.wanderFloatRafId = null;
-    }
-    this.wanderFloatLoopRunning = false;
-    this.wanderLookOffsetDeg = 0;
-    this.wanderPitchOffsetDeg = 0;
-  }
-
   getLinks(): StreetViewLink[] {
     const links = this.panorama?.getLinks() || [];
     return links
@@ -325,7 +262,6 @@ export class StreetViewController {
     if (!pos) return;
     const center = { lat: pos.lat(), lng: pos.lng() };
     const next = randomLatLngOffsetMeters(center, 28, 260);
-    this.stopWanderFloatLoop();
     this.cancelHeadingMotion();
     this.hasSeenOkStatus = false;
     this.imageryFaultEmitted = false;
@@ -424,7 +360,6 @@ export class StreetViewController {
 
   teleportTo(coords: LatLng): void {
     if (!this.panorama) return;
-    this.stopWanderFloatLoop();
     this.cancelHeadingMotion();
     this.hasSeenOkStatus = false;
     this.imageryFaultEmitted = false;
@@ -440,7 +375,6 @@ export class StreetViewController {
     this.moveInterval = window.setInterval(() => {
       this.stepForward();
     }, intervalMs);
-    this.ensureWanderFloatLoop();
   }
 
   /** Updates the wander clock without stopping float / moving state. No-op if not walking. */
@@ -460,7 +394,6 @@ export class StreetViewController {
       window.clearInterval(this.moveInterval);
       this.moveInterval = null;
     }
-    this.stopWanderFloatLoop();
     this.applyNavPovOnly();
   }
 
@@ -472,7 +405,6 @@ export class StreetViewController {
   }
 
   destroy(): void {
-    this.stopWanderFloatLoop();
     this.cancelHeadingMotion();
     this.stopWalking();
     if (this.faultDebounce !== null) {

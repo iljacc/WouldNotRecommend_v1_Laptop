@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
+    "import:reviews": "node scripts/import-review-corpus.cjs",
     "start": "node scripts/start-with-kiosk.cjs",
     "start:next": "next start",
     "lint": "eslint .",

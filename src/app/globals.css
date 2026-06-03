@@ -81,3 +81,31 @@ a[href*="google.com/maps"] {
 .teleport-mode-flash {
   animation: teleport-mode-flash 1.1s ease-in-out infinite;
 }
+
+/* Local-only Street View drift; avoids per-frame Google `setPov` tile churn. */
+@keyframes wander-look-float {
+  0%,
+  100% {
+    transform: scale(var(--wander-float-scale, 1.025))
+      translate3d(0, 0, 0)
+      rotate(0deg);
+  }
+
+  24% {
+    transform: scale(var(--wander-float-scale, 1.025))
+      translate3d(var(--wander-float-x, 16px), calc(var(--wander-float-y, 8px) * -0.45), 0)
+      rotate(var(--wander-float-rotate, 0.3deg));
+  }
+
+  52% {
+    transform: scale(var(--wander-float-scale, 1.025))
+      translate3d(calc(var(--wander-float-x, 16px) * -0.72), var(--wander-float-y, 8px), 0)
+      rotate(calc(var(--wander-float-rotate, 0.3deg) * -0.65));
+  }
+
+  78% {
+    transform: scale(var(--wander-float-scale, 1.025))
+      translate3d(calc(var(--wander-float-x, 16px) * 0.34), calc(var(--wander-float-y, 8px) * 0.5), 0)
+      rotate(calc(var(--wander-float-rotate, 0.3deg) * 0.45));
+  }
+}

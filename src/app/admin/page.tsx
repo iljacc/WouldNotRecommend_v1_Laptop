@@ -50,6 +50,8 @@ type HealthResponse = {
   mapsJavascriptApiKeyConfigured: boolean;
   geocodingApiKeyConfigured: boolean;
   placesApiKeyConfigured: boolean;
+  reviewSource?: "google" | "local";
+  reviewCorpus?: { places: number; reviews: number };
   databaseOk: boolean;
 };
 
@@ -352,6 +354,20 @@ export default function AdminPage() {
                   Places key:{" "}
                   <span className={health.placesApiKeyConfigured ? "text-[#8fbc8f]" : "text-red-400/90"}>
                     {health.placesApiKeyConfigured ? "yes" : "no"}
+                  </span>
+                </li>
+                <li>
+                  Review source:{" "}
+                  <span className="text-[#8fbc8f]">
+                    {health.reviewSource ?? "google"}
+                  </span>
+                </li>
+                <li>
+                  Local corpus:{" "}
+                  <span className="text-[#c4d0b8]">
+                    {health.reviewCorpus
+                      ? `${health.reviewCorpus.places} places / ${health.reviewCorpus.reviews} reviews`
+                      : "unknown"}
                   </span>
                 </li>
                 <li>
@@ -803,7 +819,7 @@ export default function AdminPage() {
                 checked={form.streetView.wanderLookFloatEnabled}
                 onChange={(e) => patchSv("wanderLookFloatEnabled", e.target.checked)}
               />
-              Wander look float
+              Wander visual float
             </label>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

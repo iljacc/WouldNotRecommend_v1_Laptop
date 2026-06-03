@@ -60,6 +60,8 @@ Defined in `.env.example` (copy to `.env.local`).
 | `/bot` | Main experience: Street View canvas, HUD, click-to-start (unless kiosk). Client-only bot via `useBot`. |
 | `/terminal` | Monospace activity log; subscribes to `src/lib/bot-activity.ts` `BroadcastChannel`. **Requires `/bot` open in another tab** (same origin, same browser profile). |
 | `/admin` | Dev/admin UI: bot tuning (`bot-settings` in `localStorage`), optional live activity mirror, health checks, recent reviews, teleport destination data. |
+| `/review-map` | Read-only one-off coverage map for local review corpus clusters, bot wander area, search radius, and spawn/teleport starts. |
+| `/tts-lab` | Read-only diagnostic page for auditioning local TTS engines, voices, speed, and subtitle timing against review samples. |
 
 ---
 
@@ -71,6 +73,8 @@ Defined in `.env.example` (copy to `.env.local`).
 | `GET /api/log/recent` | Recent review rows for admin. |
 | `GET /api/geocode` | Reverse geocode → city (and country for DB). |
 | `GET /api/places` | Nearby Search + Place Details/reviews; filters for target rating/length. |
+| `GET /api/review-map` | Local corpus places and one-star review counts for `/review-map`; read-only. |
+| `GET /api/tts-lab/reviews` | Small local review sample pack for `/tts-lab`; read-only. |
 | `POST /api/screenshots` | Saves JPEG from canvas data URL per review. |
 | `GET /api/health` | Key presence + DB ping (used by admin). |
 
@@ -132,7 +136,7 @@ Events include `BUSINESS_DETECTED`, `DETECT_COMPLETE`, `DELIVER_COMPLETE`, `RETU
 ## Wander vs “many network requests”
 
 - **Application steps:** `startWalking` uses `setInterval` to call `stepForward()` at **`wanderStepInterval`** (default **15s** from config unless overridden by bot settings) — not per-frame navigation.
-- **Street View imagery:** Google’s viewer loads tiles/CDN assets (`streetviewpixels`, `ggpht.com`, etc.). **`setPov` at ~60 Hz** when **wander look float** is enabled can stress imagery; 429s are often **imagery/CDN throttling**, not your Places API call rate. Tuning: `wanderLookFloatEnabled` / sway in bot settings or `STREET_VIEW` defaults in `src/lib/config.ts`.
+- **Street View imagery:** Google’s viewer loads tiles/CDN assets (`streetviewpixels`, `ggpht.com`, etc.). The ambient **wander look float** is CSS-only, so it does not call `setPov` every frame. Real POV changes are reserved for step heading blends and scripted pans. 429s are usually **imagery/CDN throttling**, not your Places API call rate. Tuning: `wanderLookFloatEnabled` / sway in bot settings or `STREET_VIEW` defaults in `src/lib/config.ts`.
 
 ---
 
@@ -181,6 +185,18 @@ Events include `BUSINESS_DETECTED`, `DETECT_COMPLETE`, `DELIVER_COMPLETE`, `RETU
 - Terminal across devices would need **SSE/WebSocket** or polling, not only `BroadcastChannel`.
 - Rate limits / 429 on Google imagery: reduce POV update frequency, check Cloud quotas and key restrictions.
 - Keep this document updated when adding routes, env vars, or major engine changes.
+
+## Local review corpus
+
+The app can run review selection from SQLite instead of Google Places by setting `REVIEW_SOURCE=local`. Import rows with `npm run import:reviews -- data/review-corpus.json` or a CSV with equivalent columns. The importer also accepts Google one-star review exports with `place_lat`, `place_lng`, `place_name`, `place_url`, `rating`, `review_text`, and `username`. It writes `review_corpus_places` and `review_corpus_reviews`; `/api/places` keeps the same GET/POST shape for the client bot, but serves nearby places and reviews from those tables.
+
+Use `/review-map` to inspect the local corpus spatially. It reads `GET /api/review-map`, draws one-star review clusters, the configured wander area, search radius, and custom/default spawn points. The page is diagnostic only and does not alter settings or database rows.
+
+Local corpus review rows persist read history in `read_count`, `last_read_at`, and `last_selected_at`. The default exact-review repeat cooldown is 180 minutes. Local `/api/places` prefers unread or cooled-down reviews; if a place has no cooled-down matching reviews, it can return the oldest read review as a fallback so the installation does not go quiet. Different one-star reviews from the same place remain eligible.
+
+Use `/tts-lab` to test review readout before changing the kiosk. It fetches samples from `GET /api/tts-lab/reviews` and sends per-request engine/voice/speed options to `POST /api/tts`.
+
+Current local TTS defaults to Piper via `.venv-piper` and the voice models in `vendor/piper-voices`. Kokoro remains available when `TTS_ENGINE=kokoro`, using `.venv-kokoro` and `scripts/kokoro-synth.py`.
 
 ---
 

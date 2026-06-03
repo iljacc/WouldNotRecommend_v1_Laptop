@@ -12,6 +12,8 @@ const eslintConfig = [
   {
     ignores: [
       ".next/**",
+      ".venv-kokoro/**",
+      ".venv-piper/**",
       "node_modules/**",
       "next-env.d.ts",
       "data/db/**",

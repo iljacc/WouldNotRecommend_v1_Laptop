@@ -45,7 +45,8 @@ After fetching reviews for one place, the bot **filters** them:
 
 - **Star rating** must match the configured **target** (by default, **1 star**).
 - **Length** must be between a **minimum** and **maximum** character range (defaults tuned for short-ish quotes).
-- **Already read recently** (by a simple hash of the text) is skipped for a configurable **cooldown** (default about **30 minutes**) so the same line is not repeated back-to-back; after that, it may be read again (useful when the audience turns over in an installation).
+- **Already read recently** (by a simple hash of the text) is skipped for a configurable **cooldown** (default **180 minutes**) so the same line is not repeated while the bot is still circling the same street; after that, it may be read again.
+- In local review-corpus mode, read history is also persisted in SQLite. The default repeat cooldown is **180 minutes**. The bot may still read a different one-star review from the same business; the cooldown is for the exact review row/text.
 - **Language heuristic:** reviews where very little of the text looks Latin letters may be dropped (reduces noisy non-Latin spam in an English-forward install).
 
 If anything passes the filter, one review is chosen by mode:
@@ -53,7 +54,7 @@ If anything passes the filter, one review is chosen by mode:
 - **Random** — pick one at random from the filtered set.
 - **Shortest / longest** — pick the shortest or longest text among the filtered set.
 
-If **nothing** passes, that place is marked “exhausted” for a **cooldown** (default about **30 minutes**), then it can be tried again.
+If **nothing** passes, that place is marked “exhausted” for a **cooldown** (default about **5 minutes**), then it can be tried again.
 
 ### Cooldown between reviews
 
@@ -72,7 +73,7 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 
 ### How the camera behaves
 
-- **While walking:** The “navigation heading” tracks which way the bot is going along links. Optionally, a **gentle sway** (yaw and a little pitch) is applied on top so the view feels alive—this is **look-only** and does not change which link is chosen.
+- **While walking:** The “navigation heading” tracks which way the bot is going along links. Optionally, a **gentle visual drift** is applied to the Street View layer so the view feels alive. This is CSS-only, does not call Street View `setPov` every frame, and does not change which link is chosen.
 - **When aligning for a review:** The camera **rotates** (pan) toward the **bearing** from the Street View position to the business coordinates—so the storefront direction matches geometry, not just link headings.
 - **After the review:** It **rotates back** toward the remembered wander heading.
 - **Teleports:** Position jumps to new lat/lng; heading may reset; the float effect stops until walking resumes.
@@ -85,7 +86,7 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 |--------|----------------|
 | **State machine** | `src/engine/state-machine.ts` — `WANDER` → `DETECT` → `DELIVER` → `RETURN`; teleports `TELEPORT`. |
 | **Orchestration** | `src/engine/bot.ts` — timers, `checkForBusiness` every 3s in wander, `onWanderStep`, effects. |
-| **Street View movement** | `src/engine/street-view-controller.ts` — `stepForward()` chooses `StreetViewLink` by `linkSelectionMode` + `wanderHeadingWobble`; `setPano`; `runHeadingMotion` for blends; `panToHeading` for detect/return; `ensureWanderFloatLoop` for optional POV sway. |
+| **Street View movement** | `src/engine/street-view-controller.ts` — `stepForward()` chooses `StreetViewLink` by `linkSelectionMode` + `wanderHeadingWobble`; `setPano`; `runHeadingMotion` for blends; `panToHeading` for detect/return. Ambient wander float is a CSS transform in `src/components/VisualEffects.tsx`. |
 | **Places: list nearby** | `GET /api/places` → Nearby Search; **`lazy=1`** first page + `nextPageToken`; **`pageToken=`** for the next page. Optional merged multi-page without `lazy`. In-memory TTL cache in `src/app/api/places/` + `places-nearby-cache.ts`. |
 | **Places: reviews** | `POST /api/places` → Google **Place Details** `details/json`, `fields=name,reviews,types,geometry`. |
 | **Distances & filters** | `ReviewManager` — `shouldQuery`, `fetchNearbyBusinessesFirstPage`, `fetchNearbyNextPage`, `findNearestBusiness` (sorted candidates), `fetchAndSelectReview`, `filterReviews`, `selectReview`. |
@@ -97,8 +98,8 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `searchRadius` | 200 m | Nearby Search radius |
-| `detectionRadius` | 150 m | Max distance to accept cached business as “nearest” |
+| `searchRadius` | 700 m | Nearby Search radius |
+| `detectionRadius` | 700 m | Max distance to accept cached business as “nearest” |
 | `queryDistanceThreshold` | 75 m | Min movement since last query coords to allow a new nearby fetch |
 | `queryMinInterval` | 30_000 ms | Min time between nearby fetches |
 | `minStepsBetweenReviews` | 3 | Successful `stepForward` callbacks before another detection attempt |
@@ -111,8 +112,8 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 | `nearbyCacheTtlMs` | 600_000 ms | Server first-page lazy cache TTL; `0` disables |
 | `MAX_PLACE_DETAILS_ATTEMPTS_PER_CHECK` | 12 | Max Place Details calls per 3s `checkForBusiness` tick |
 | `NEARBY_EXTRA_PAGE_ROUNDS_PER_CHECK` | 2 | Max extra Nearby page fetches in the same tick if no POI yields a review |
-| `reviewRepeatCooldownMinutes` | 30 | Min time before the same review text can be read again |
-| `placeRetryCooldownMinutes` | 30 | Min time before re-trying a place that had no passing review |
+| `reviewRepeatCooldownMinutes` | 5 | Min time before the same review text can be read again |
+| `placeRetryCooldownMinutes` | 5 | Min time before re-trying a place that had no passing review |
 
 ### Camera-related timings (defaults)
 
@@ -132,5 +133,13 @@ If the bot is **stuck** (barely moving for long enough) or **imagery fails**, it
 - **Accuracy:** Street View position is **pano-based**; business coordinates are **Places** geometry. Bearings use `haversine`-style math in `review-manager.ts`—good enough for “face roughly toward the POI,” not survey-grade.
 
 ---
+
+### Local review corpus mode
+
+Set `REVIEW_SOURCE=local` to make `/api/places` read nearby places and reviews from SQLite instead of calling Google Places for review data. Populate the corpus with `npm run import:reviews -- data/review-corpus.json` or a Google one-star CSV export containing columns such as `place_lat`, `place_lng`, `place_name`, `rating`, `review_text`, and `username`; the bot keeps using the same `ReviewManager` filters and cooldowns after the local rows are returned.
+
+For a one-off visual coverage check, open `/review-map`. It overlays the local one-star review corpus, the current bot wander region, the search-radius circle, and the custom/default spawn positions on a Google Map so you can inspect where reviews cluster before running the bot.
+
+For voice and subtitle timing tests, open `/tts-lab`. It loads real local review samples and lets you try Piper/Kokoro voices, speed, pre-read hold, subtitle lead/lag, and post-read linger before copying those choices into the bot/admin settings.
 
 *Generated to reflect the codebase structure; if behavior changes, update this doc alongside `src/lib/config.ts` and `src/lib/bot-settings.ts` defaults.*

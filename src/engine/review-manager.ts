@@ -16,11 +16,42 @@ type ApiPlace = {
 };
 
 type ApiReview = {
+  reviewId?: string;
   text: string;
   rating: number;
   authorName: string;
   relativeTimeDescription: string;
+  usedRecentFallback?: boolean;
 };
+
+async function readApiJson<T>(response: Response, label: string): Promise<T> {
+  const text = await response.text();
+  let data: unknown = {};
+
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      const snippet = text.replace(/\s+/g, " ").slice(0, 160);
+      throw new Error(
+        `${label} returned non-JSON (${response.status}): ${snippet}`,
+      );
+    }
+  }
+
+  if (!response.ok) {
+    const error =
+      data &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof data.error === "string"
+        ? data.error
+        : response.statusText || "Request failed";
+    throw new Error(`${label} failed (${response.status}): ${error}`);
+  }
+
+  return data as T;
+}
 
 export function haversineDistance(a: LatLng, b: LatLng): number {
   const radius = 6_371_000;
@@ -68,11 +99,14 @@ function pruneStaleReviewReads(
 export function filterReviews(
   reviews: Review[],
   readAt: Map<string, number>,
+  options?: { ignoreReadCooldown?: boolean },
 ): Review[] {
   const { reviews: revCfg } = getBotSettings();
   const cooldownMs = revCfg.reviewRepeatCooldownMinutes * 60 * 1000;
   const now = Date.now();
-  pruneStaleReviewReads(readAt, cooldownMs, now);
+  if (!options?.ignoreReadCooldown) {
+    pruneStaleReviewReads(readAt, cooldownMs, now);
+  }
 
   return reviews.filter((review) => {
     if (review.rating !== revCfg.targetRating) return false;
@@ -80,7 +114,13 @@ export function filterReviews(
     if (review.text.length > revCfg.maxLength) return false;
 
     const lastRead = readAt.get(review.hash);
-    if (lastRead !== undefined && now - lastRead < cooldownMs) return false;
+    if (
+      !options?.ignoreReadCooldown &&
+      lastRead !== undefined &&
+      now - lastRead < cooldownMs
+    ) {
+      return false;
+    }
 
     const latinChars = review.text.replace(/[^a-zA-Z]/g, "").length;
     const totalChars = review.text.replace(/\s/g, "").length;
@@ -195,12 +235,13 @@ export class ReviewManager {
         radius: String(places.searchRadius),
         lazy: "1",
         cacheTtlMs: String(places.nearbyCacheTtlMs),
+        targetRating: String(getBotSettings().reviews.targetRating),
       });
       const response = await fetch(`/api/places?${params.toString()}`);
-      const data = (await response.json()) as {
+      const data = await readApiJson<{
         places?: ApiPlace[];
         nextPageToken?: string | null;
-      };
+      }>(response, "Nearby places");
 
       const raw = data.places || [];
       this.nearbyPagesLoaded = 1;
@@ -258,10 +299,10 @@ export class ReviewManager {
         pageToken: token,
       });
       const response = await fetch(`/api/places?${params.toString()}`);
-      const data = (await response.json()) as {
+      const data = await readApiJson<{
         places?: ApiPlace[];
         nextPageToken?: string | null;
-      };
+      }>(response, "Nearby places next page");
 
       const raw = data.places || [];
       const before = this.cachedBusinesses.length;
@@ -324,23 +365,46 @@ export class ReviewManager {
       const response = await fetch("/api/places", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ placeId }),
+        body: JSON.stringify({
+          placeId,
+          targetRating: getBotSettings().reviews.targetRating,
+          minLength: getBotSettings().reviews.minLength,
+          maxLength: getBotSettings().reviews.maxLength,
+          cooldownMinutes: getBotSettings().reviews.reviewRepeatCooldownMinutes,
+        }),
       });
-      const data = (await response.json()) as {
+      const data = await readApiJson<{
         reviews?: ApiReview[];
         types?: string[];
-      };
+        source?: string;
+      }>(response, "Place reviews");
 
       const reviews = (data.reviews || []).map((review) => ({
         ...review,
         hash: hashReview(review.text),
       }));
-      const filtered = filterReviews(reviews, this.readAtByHash);
+      const usedRecentFallback = reviews.some((review) => review.usedRecentFallback);
+      const filtered = filterReviews(reviews, this.readAtByHash, {
+        ignoreReadCooldown: usedRecentFallback,
+      });
       const mode = getBotSettings().reviewSelectionMode;
       const selected = selectReview(filtered, mode);
 
       if (selected) {
         this.readAtByHash.set(selected.hash, Date.now());
+        if (data.source === "local") {
+          const sourceReview = reviews.find((review) => review.hash === selected.hash);
+          void fetch("/api/places", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "markRead",
+              placeId,
+              reviewId: sourceReview?.reviewId,
+              reviewText: selected.text,
+            }),
+          });
+        }
       } else {
         this.exhaustedPlaceAt.set(placeId, now);
       }

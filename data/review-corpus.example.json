@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Example Kiosk Cafe",
+    "lat": 52.078102,
+    "lng": 4.314051,
+    "types": ["cafe", "establishment"],
+    "placeRating": 3.4,
+    "totalRatings": 42,
+    "source": "example",
+    "reviews": [
+      {
+        "reviewText": "The coffee arrived cold and the chair made a terrible sound.",
+        "reviewRating": 1,
+        "authorName": "Example reviewer",
+        "relativeTimeDescription": "example only"
+      }
+    ]
+  }
+]

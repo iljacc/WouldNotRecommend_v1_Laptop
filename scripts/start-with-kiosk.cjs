@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 /**
  * Production start with optional presentation (kiosk) browser.
  *
@@ -125,7 +127,6 @@ function openKiosk(browserPath, url) {
     stdio: "ignore",
   });
   child.unref();
-  // eslint-disable-next-line no-console
   console.log(`[start-with-kiosk] Opened kiosk: ${browserPath}\n  ${url}`);
 }
 
@@ -164,7 +165,6 @@ nextChild.on("exit", (code, signal) => {
   if (!shouldOpenKiosk()) {
     const v = process.env.GSV_KIOSK;
     if (v && ["0", "false", "no", "off"].includes(String(v).toLowerCase())) {
-      // eslint-disable-next-line no-console
       console.log("[start-with-kiosk] Kiosk disabled (GSV_KIOSK=0).");
     }
     return;
