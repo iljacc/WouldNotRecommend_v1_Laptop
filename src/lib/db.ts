@@ -1,7 +1,14 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
-import type { ReviewLogEntry, SessionStats } from "./types";
+import type {
+  BotMonitorEvent,
+  BotMonitorEventInput,
+  BotMonitorReport,
+  BotMonitorWarning,
+  ReviewLogEntry,
+  SessionStats,
+} from "./types";
 
 const DB_DIR = path.join(process.cwd(), "data", "db");
 const DB_PATH = path.join(DB_DIR, "would-not-recommend.db");
@@ -61,6 +68,29 @@ function initSchema(instance: Database.Database): void {
       country TEXT NOT NULL UNIQUE
     );
 
+    CREATE TABLE IF NOT EXISTS bot_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      message TEXT NOT NULL,
+      lat REAL,
+      lng REAL,
+      state TEXT NOT NULL DEFAULT '',
+      status_code INTEGER,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_events_session_id_id
+      ON bot_events (session_id, id);
+
+    CREATE INDEX IF NOT EXISTS idx_bot_events_timestamp
+      ON bot_events (timestamp);
+
+    CREATE INDEX IF NOT EXISTS idx_bot_events_status_code
+      ON bot_events (status_code);
+
     CREATE TABLE IF NOT EXISTS review_corpus_places (
       place_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -112,6 +142,18 @@ function migrateSchema(instance: Database.Database): void {
   });
   ensureColumns(instance, "sessions", {
     teleports: "INTEGER NOT NULL DEFAULT 0",
+  });
+  ensureColumns(instance, "bot_events", {
+    session_id: "TEXT NOT NULL DEFAULT ''",
+    timestamp: "TEXT NOT NULL DEFAULT ''",
+    tag: "TEXT NOT NULL DEFAULT ''",
+    message: "TEXT NOT NULL DEFAULT ''",
+    lat: "REAL",
+    lng: "REAL",
+    state: "TEXT NOT NULL DEFAULT ''",
+    status_code: "INTEGER",
+    metadata_json: "TEXT NOT NULL DEFAULT '{}'",
+    created_at: "TEXT NOT NULL DEFAULT ''",
   });
   ensureColumns(instance, "review_corpus_reviews", {
     read_count: "INTEGER NOT NULL DEFAULT 0",
@@ -258,6 +300,504 @@ export function countReviewsBetween(startIso: string, endIsoExclusive: string): 
   return row.total;
 }
 
+type BotMonitorEventRow = {
+  id: number;
+  session_id: string;
+  timestamp: string;
+  tag: string;
+  message: string;
+  lat: number | null;
+  lng: number | null;
+  state: string;
+  status_code: number | null;
+  metadata_json: string;
+};
+
+function parseMetadata(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Keep malformed historical rows readable.
+  }
+  return {};
+}
+
+function monitorRowToEvent(row: BotMonitorEventRow): BotMonitorEvent {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    timestamp: row.timestamp,
+    tag: row.tag,
+    message: row.message,
+    lat: row.lat,
+    lng: row.lng,
+    state: row.state,
+    statusCode: row.status_code,
+    metadata: parseMetadata(row.metadata_json),
+  };
+}
+
+function eventTimeMs(event: Pick<BotMonitorEvent, "timestamp">): number {
+  const ms = Date.parse(event.timestamp);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function extractNumber(pattern: RegExp, text: string): number | undefined {
+  const match = text.match(pattern);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+const REVIEW_GAP_WARNING_MS = 2 * 60 * 1000;
+const DETECT_STALL_WARNING_MS = 10 * 1000;
+const RUNTIME_HEARTBEAT_GAP_WARNING_MS = 45 * 1000;
+
+export function insertBotEvent(input: BotMonitorEventInput): void {
+  const timestamp = input.timestamp || new Date().toISOString();
+  const metadataJson = JSON.stringify(input.metadata ?? {});
+  db()
+    .prepare(
+      `INSERT INTO bot_events
+       (session_id, timestamp, tag, message, lat, lng, state, status_code, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.sessionId ?? "",
+      timestamp,
+      input.tag,
+      input.message,
+      input.lat ?? null,
+      input.lng ?? null,
+      input.state ?? "",
+      input.statusCode ?? null,
+      metadataJson,
+    );
+}
+
+export function getLatestBotSessionId(): string {
+  const row = db()
+    .prepare(
+      `SELECT session_id
+       FROM bot_events
+       WHERE session_id <> ''
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get() as { session_id: string } | undefined;
+  return row?.session_id ?? "";
+}
+
+export function getRecentBotEvents(options?: {
+  sessionId?: string;
+  limit?: number;
+}): BotMonitorEvent[] {
+  const capped = Math.min(1000, Math.max(1, Math.floor(options?.limit ?? 200)));
+  const sessionId = options?.sessionId?.trim();
+  const rows = sessionId
+    ? (db()
+        .prepare(
+          `SELECT id, session_id, timestamp, tag, message, lat, lng, state, status_code, metadata_json
+           FROM bot_events
+           WHERE session_id = ?
+           ORDER BY id DESC
+           LIMIT ?`,
+        )
+        .all(sessionId, capped) as BotMonitorEventRow[])
+    : (db()
+        .prepare(
+          `SELECT id, session_id, timestamp, tag, message, lat, lng, state, status_code, metadata_json
+           FROM bot_events
+           ORDER BY id DESC
+           LIMIT ?`,
+        )
+        .all(capped) as BotMonitorEventRow[]);
+
+  return rows.map(monitorRowToEvent);
+}
+
+function getBotEventsForReport(sessionId: string): BotMonitorEvent[] {
+  const rows = db()
+    .prepare(
+      `SELECT id, session_id, timestamp, tag, message, lat, lng, state, status_code, metadata_json
+       FROM bot_events
+       WHERE session_id = ?
+       ORDER BY id ASC`,
+    )
+    .all(sessionId) as BotMonitorEventRow[];
+  return rows.map(monitorRowToEvent);
+}
+
+function warning(
+  level: BotMonitorWarning["level"],
+  code: string,
+  message: string,
+  since?: string,
+): BotMonitorWarning {
+  return { level, code, message, since };
+}
+
+export function getBotMonitorReport(sessionIdInput?: string): BotMonitorReport {
+  const sessionId = sessionIdInput?.trim() || getLatestBotSessionId();
+  const events = sessionId ? getBotEventsForReport(sessionId) : [];
+  const now = Date.now();
+  const first = events[0] ?? null;
+  const last = events[events.length - 1] ?? null;
+  const countsByTag: Record<string, number> = {};
+  const statusCounts: Record<number, number> = {};
+
+  for (const event of events) {
+    countsByTag[event.tag] = (countsByTag[event.tag] ?? 0) + 1;
+    if (event.statusCode !== null) {
+      statusCounts[event.statusCode] = (statusCounts[event.statusCode] ?? 0) + 1;
+    }
+  }
+
+  const reviews = events.filter(
+    (event) => event.tag === "REVIEW" && event.message.startsWith("placeId="),
+  );
+  const searching = events.filter((event) => event.tag === "SEARCHING");
+  const teleports = events.filter((event) => event.tag === "TELEPORT");
+  const boundaries = events.filter((event) => event.tag === "BOUNDARY");
+  const mapsErrors = events.filter(
+    (event) =>
+      event.tag === "MAPS" &&
+      (event.statusCode !== null ||
+        /status=|black-frame|tile\/CDN burst/i.test(event.message)),
+  );
+  const runtimeEvents = events.filter((event) => event.tag === "RUNTIME");
+  const runtimeHeartbeatGaps = runtimeEvents.filter(
+    (event) =>
+      /heartbeat_gap/i.test(event.message) ||
+      (typeof event.metadata.deltaMs === "number" &&
+        event.metadata.deltaMs >= RUNTIME_HEARTBEAT_GAP_WARNING_MS),
+  );
+  const runtimeHiddenEvents = runtimeEvents.filter(
+    (event) =>
+      /hidden=true|visibility=hidden/i.test(event.message) ||
+      event.metadata.hidden === true ||
+      event.metadata.visibilityState === "hidden",
+  );
+  const runtimeBlurEvents = runtimeEvents.filter(
+    (event) =>
+      /(^|\s)blur(\s|\|)|focused=false/i.test(event.message) ||
+      event.metadata.event === "blur" ||
+      event.metadata.focused === false,
+  );
+  const runtimeLifecyclePauses = runtimeEvents.filter(
+    (event) =>
+      /(^|\s)(freeze|pagehide|offline)(\s|\|)/i.test(event.message) ||
+      event.metadata.event === "freeze" ||
+      event.metadata.event === "pagehide" ||
+      event.metadata.event === "offline",
+  );
+  const stateEvents = events.filter((event) => event.tag === "STATE");
+  const errorEvents = events.filter(
+    (event) =>
+      event.tag === "WARN" ||
+      event.statusCode !== null ||
+      /error|failed|fault|timeout|black-frame|429|503/i.test(event.message),
+  );
+  const warnings: BotMonitorWarning[] = [];
+  const lastEventAgeMs = last ? now - eventTimeMs(last) : Infinity;
+  const lastReview = reviews[reviews.length - 1] ?? null;
+  const lastStep = searching[searching.length - 1] ?? null;
+  const lastState = stateEvents[stateEvents.length - 1] ?? null;
+  const lastStepAt = lastStep ? eventTimeMs(lastStep) : 0;
+  let maxReviewGapMs = 0;
+  let maxReviewGapFrom: BotMonitorEvent | null = null;
+  let maxReviewGapTo: BotMonitorEvent | null = null;
+  for (let index = 1; index < reviews.length; index += 1) {
+    const from = reviews[index - 1]!;
+    const to = reviews[index]!;
+    const gapMs = eventTimeMs(to) - eventTimeMs(from);
+    if (gapMs > maxReviewGapMs) {
+      maxReviewGapMs = gapMs;
+      maxReviewGapFrom = from;
+      maxReviewGapTo = to;
+    }
+  }
+
+  let maxDetectStallMs = 0;
+  let maxDetectStallFrom: BotMonitorEvent | null = null;
+  let maxDetectStallTo: BotMonitorEvent | null = null;
+  for (let index = 0; index < stateEvents.length - 1; index += 1) {
+    const from = stateEvents[index]!;
+    const to = stateEvents[index + 1]!;
+    if (!from.message.startsWith("DETECT") || !to.message.startsWith("DELIVER")) {
+      continue;
+    }
+    const gapMs = eventTimeMs(to) - eventTimeMs(from);
+    if (gapMs > maxDetectStallMs) {
+      maxDetectStallMs = gapMs;
+      maxDetectStallFrom = from;
+      maxDetectStallTo = to;
+    }
+  }
+
+  if (!last) {
+    warnings.push(
+      warning(
+        "info",
+        "no_events",
+        "No monitor events have been recorded yet. Start /bot to begin an overnight run.",
+      ),
+    );
+  } else if (lastEventAgeMs > 10 * 60 * 1000) {
+    warnings.push(
+      warning(
+        "critical",
+        "event_silence",
+        "No bot activity has been recorded for more than 10 minutes.",
+        last.timestamp,
+      ),
+    );
+  }
+
+  if (lastReview && now - eventTimeMs(lastReview) > 45 * 60 * 1000) {
+    warnings.push(
+      warning(
+        "warning",
+        "review_drought",
+        "No review has been selected for more than 45 minutes.",
+        lastReview.timestamp,
+      ),
+    );
+  } else if (!lastReview && first && now - eventTimeMs(first) > 45 * 60 * 1000) {
+    warnings.push(
+      warning(
+        "warning",
+        "review_drought",
+        "This session has run for more than 45 minutes without selecting a review.",
+        first.timestamp,
+      ),
+    );
+  }
+
+  if (maxReviewGapMs >= REVIEW_GAP_WARNING_MS && maxReviewGapFrom && maxReviewGapTo) {
+    const runtimeContext = runtimeEvents
+      .filter(
+        (event) =>
+          eventTimeMs(event) >= eventTimeMs(maxReviewGapFrom!) &&
+          eventTimeMs(event) <= eventTimeMs(maxReviewGapTo!),
+      )
+      .filter(
+        (event) =>
+          /heartbeat_gap|hidden=true|visibility=hidden|focused=false|blur|freeze|pagehide|offline/i.test(
+            event.message,
+          ) ||
+          event.metadata.hidden === true ||
+          event.metadata.focused === false ||
+          event.metadata.event === "heartbeat_gap",
+      );
+    warnings.push(
+      warning(
+        maxReviewGapMs >= 10 * 60 * 1000 ? "critical" : "warning",
+        "review_gap_history",
+        `Longest completed review gap was ${Math.round(maxReviewGapMs / 1000)} seconds.${
+          runtimeContext.length > 0
+            ? ` Runtime visibility/heartbeat signals occurred inside that gap (${runtimeContext.length}).`
+            : ""
+        }`,
+        maxReviewGapFrom.timestamp,
+      ),
+    );
+  }
+
+  if (
+    maxDetectStallMs >= DETECT_STALL_WARNING_MS &&
+    maxDetectStallFrom &&
+    maxDetectStallTo
+  ) {
+    warnings.push(
+      warning(
+        maxDetectStallMs >= 60 * 1000 ? "critical" : "warning",
+        "detect_stall_history",
+        `Longest DETECT to DELIVER stall was ${Math.round(maxDetectStallMs / 1000)} seconds.`,
+        maxDetectStallFrom.timestamp,
+      ),
+    );
+  }
+
+  if (lastStep && now - eventTimeMs(lastStep) > 10 * 60 * 1000) {
+    warnings.push(
+      warning(
+        "warning",
+        "movement_gap",
+        "No SEARCHING step has been recorded for more than 10 minutes.",
+        lastStep.timestamp,
+      ),
+    );
+  }
+
+  if (
+    lastState &&
+    /DETECT|DELIVER|RETURN|TELEPORT/.test(lastState.message) &&
+    eventTimeMs(lastState) > lastStepAt &&
+    now - eventTimeMs(lastState) > 5 * 60 * 1000
+  ) {
+    warnings.push(
+      warning(
+        "critical",
+        "state_stall",
+        `Bot appears stuck after state event: ${lastState.message}`,
+        lastState.timestamp,
+      ),
+    );
+  }
+
+  const status429 = statusCounts[429] ?? 0;
+  const status503 = statusCounts[503] ?? 0;
+  if (status429 > 0 || status503 > 0) {
+    warnings.push(
+      warning(
+        status429 + status503 > 5 ? "critical" : "warning",
+        "maps_429_503",
+        `Observed Google imagery HTTP errors: 429=${status429}, 503=${status503}.`,
+      ),
+    );
+  }
+
+  const blackFrames = mapsErrors.filter((event) => /black-frame/i.test(event.message));
+  if (blackFrames.length > 0) {
+    warnings.push(
+      warning(
+        "warning",
+        "black_frames",
+        `Observed ${blackFrames.length} Street View black-frame diagnostic event(s).`,
+        blackFrames[blackFrames.length - 1]?.timestamp,
+      ),
+    );
+  }
+
+  if (teleports.length >= 10) {
+    warnings.push(
+      warning(
+        "warning",
+        "frequent_teleports",
+        `Observed ${teleports.length} teleport event(s); inspect causes for loops or imagery recovery.`,
+      ),
+    );
+  }
+
+  if (boundaries.length > 0) {
+    warnings.push(
+      warning(
+        "info",
+        "boundary_activity",
+        `Observed ${boundaries.length} boundary/fallback event(s).`,
+        boundaries[boundaries.length - 1]?.timestamp,
+      ),
+    );
+  }
+
+  if (runtimeHeartbeatGaps.length > 0) {
+    const worstGap = runtimeHeartbeatGaps.reduce((worst, event) => {
+      const delta =
+        typeof event.metadata.deltaMs === "number" ? event.metadata.deltaMs : 0;
+      const worstDelta =
+        typeof worst.metadata.deltaMs === "number" ? worst.metadata.deltaMs : 0;
+      return delta > worstDelta ? event : worst;
+    }, runtimeHeartbeatGaps[0]!);
+    const deltaMs =
+      typeof worstGap.metadata.deltaMs === "number"
+        ? worstGap.metadata.deltaMs
+        : undefined;
+    warnings.push(
+      warning(
+        deltaMs && deltaMs >= 5 * 60 * 1000 ? "critical" : "warning",
+        "runtime_heartbeat_gap",
+        `Observed ${runtimeHeartbeatGaps.length} delayed runtime heartbeat(s)${
+          deltaMs ? `; worst was ${Math.round(deltaMs / 1000)} seconds` : ""
+        }. Browser, display, OS sleep, or tab throttling may have paused the bot page.`,
+        worstGap.timestamp,
+      ),
+    );
+  }
+
+  if (runtimeHiddenEvents.length > 0) {
+    warnings.push(
+      warning(
+        "warning",
+        "runtime_hidden",
+        `Bot page reported hidden visibility ${runtimeHiddenEvents.length} time(s). This can throttle rendering and Street View step callbacks.`,
+        runtimeHiddenEvents[runtimeHiddenEvents.length - 1]?.timestamp,
+      ),
+    );
+  }
+
+  if (runtimeBlurEvents.length > 0) {
+    warnings.push(
+      warning(
+        "info",
+        "runtime_blur",
+        `Bot page reported loss of focus or focused=false ${runtimeBlurEvents.length} time(s).`,
+        runtimeBlurEvents[runtimeBlurEvents.length - 1]?.timestamp,
+      ),
+    );
+  }
+
+  if (runtimeLifecyclePauses.length > 0) {
+    warnings.push(
+      warning(
+        "warning",
+        "runtime_lifecycle_pause",
+        `Observed ${runtimeLifecyclePauses.length} page lifecycle/offline pause signal(s).`,
+        runtimeLifecyclePauses[runtimeLifecyclePauses.length - 1]?.timestamp,
+      ),
+    );
+  }
+
+  const statusFromText = events
+    .map((event) => extractNumber(/status=(\d{3})/, event.message))
+    .filter((status): status is number => status !== undefined);
+  for (const status of statusFromText) {
+    if ((status === 429 || status === 503) && !statusCounts[status]) {
+      warnings.push(
+        warning(
+          "warning",
+          "maps_status_text",
+          `Observed Google imagery status ${status} in diagnostic text.`,
+        ),
+      );
+      break;
+    }
+  }
+
+  const startedAt = first?.timestamp ?? new Date().toISOString();
+  const lastEventAt = last?.timestamp ?? startedAt;
+  const runtimeSeconds = Math.max(
+    0,
+    Math.round((eventTimeMs({ timestamp: lastEventAt }) - eventTimeMs({ timestamp: startedAt })) / 1000),
+  );
+
+  return {
+    sessionId,
+    startedAt,
+    lastEventAt,
+    runtimeSeconds,
+    totalEvents: events.length,
+    countsByTag,
+    statusCounts,
+    reviewsRead: reviews.length,
+    teleports: teleports.length,
+    boundaryEvents: boundaries.length,
+    mapsErrors: mapsErrors.length,
+    runtimeEvents: runtimeEvents.length,
+    runtimeHeartbeatGaps: runtimeHeartbeatGaps.length,
+    runtimeHiddenEvents: runtimeHiddenEvents.length,
+    runtimeBlurEvents: runtimeBlurEvents.length,
+    lastRuntime: runtimeEvents[runtimeEvents.length - 1] ?? null,
+    lastReview,
+    lastError: errorEvents[errorEvents.length - 1] ?? null,
+    warnings,
+    recentEvents: events.slice(-200).reverse(),
+  };
+}
+
 export type RecentReviewLogRow = {
   id: number;
   timestamp: string;
@@ -272,6 +812,7 @@ export type ReviewCorpusPlace = {
   name: string;
   location: { lat: number; lng: number };
   types: string[];
+  source?: "local";
   rating?: number;
   totalRatings?: number;
 };
@@ -589,22 +1130,12 @@ export function getTtsLabReviewSamples(options: {
 export function getNearbyReviewCorpusPlaces(options: {
   lat: number;
   lng: number;
-  radius: number;
+  limit?: number;
   targetRating?: number;
 }): ReviewCorpusPlace[] {
-  const { lat, lng, radius, targetRating } = options;
-  const safeRadius = Math.max(1, radius);
+  const { lat, lng, targetRating } = options;
+  const limit = Math.min(250, Math.max(1, Math.floor(options.limit ?? 80)));
   const ratingFilter = Number.isFinite(targetRating) ? targetRating : null;
-  const latDelta = safeRadius / 111_320;
-  const lngScale = Math.max(0.01, Math.cos((lat * Math.PI) / 180));
-  const lngDelta = safeRadius / (111_320 * lngScale);
-
-  const bounds = [
-    lat - latDelta,
-    lat + latDelta,
-    lng - lngDelta,
-    lng + lngDelta,
-  ];
   const places: ReviewCorpusPlace[] = [];
 
   if (hasTable("offline_places") && hasTable("offline_reviews")) {
@@ -612,15 +1143,13 @@ export function getNearbyReviewCorpusPlaces(options: {
       .prepare(
         `SELECT id, source_place_id, name, lat, lng, types_json, rating, user_ratings_total
          FROM offline_places
-         WHERE lat BETWEEN ? AND ?
-           AND lng BETWEEN ? AND ?
-           AND EXISTS (
+         WHERE EXISTS (
              SELECT 1 FROM offline_reviews
              WHERE offline_reviews.place_id = offline_places.id
                AND (? IS NULL OR offline_reviews.rating = ?)
            )`,
       )
-      .all(...bounds, ratingFilter, ratingFilter) as {
+      .all(ratingFilter, ratingFilter) as {
       id: number;
       source_place_id: string;
       name: string;
@@ -637,6 +1166,7 @@ export function getNearbyReviewCorpusPlaces(options: {
         name: row.name,
         location: { lat: row.lat, lng: row.lng },
         types: parseTypes(row.types_json),
+        source: "local" as const,
         rating: row.rating ?? undefined,
         totalRatings: row.user_ratings_total ?? undefined,
       })),
@@ -648,15 +1178,13 @@ export function getNearbyReviewCorpusPlaces(options: {
       .prepare(
         `SELECT place_id, name, lat, lng, types_json, rating, total_ratings
          FROM review_corpus_places
-         WHERE lat BETWEEN ? AND ?
-           AND lng BETWEEN ? AND ?
-           AND EXISTS (
+         WHERE EXISTS (
              SELECT 1 FROM review_corpus_reviews
              WHERE review_corpus_reviews.place_id = review_corpus_places.place_id
                AND (? IS NULL OR review_corpus_reviews.review_rating = ?)
            )`,
       )
-      .all(...bounds, ratingFilter, ratingFilter) as {
+      .all(ratingFilter, ratingFilter) as {
     place_id: string;
     name: string;
     lat: number;
@@ -672,6 +1200,7 @@ export function getNearbyReviewCorpusPlaces(options: {
         name: row.name,
         location: { lat: row.lat, lng: row.lng },
         types: parseTypes(row.types_json),
+        source: "local" as const,
         rating: row.rating ?? undefined,
         totalRatings: row.total_ratings ?? undefined,
       })),
@@ -684,8 +1213,8 @@ export function getNearbyReviewCorpusPlaces(options: {
       place,
       distance: distanceMeters(origin, place.location),
     }))
-    .filter(({ distance }) => distance <= safeRadius)
     .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit)
     .map(({ place }) => place);
 }
 

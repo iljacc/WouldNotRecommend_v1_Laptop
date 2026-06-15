@@ -12,7 +12,7 @@ export type Effect =
   | { type: "STOP_WALKING" }
   | { type: "PAN_TO_BUSINESS"; bearingDeg: number }
   | { type: "PAN_TO_WANDER_HEADING" }
-  | { type: "START_TTS"; text: string }
+  | { type: "START_TTS"; text: string; piperVoiceIndex?: number }
   | { type: "PLAY_BLEEP" }
   | { type: "PLAY_BLOOP" }
   | { type: "CROSSFADE_TO_A" }
@@ -40,10 +40,6 @@ export function transition(
       if (event.type === "BUSINESS_DETECTED") {
         return {
           newState: BotState.DETECT,
-          scheduleTimer: {
-            event: { type: "DETECT_COMPLETE" },
-            delayMs: timing.reviewAlignDuration,
-          },
           effects: [
             { type: "STOP_WALKING" },
             { type: "CROSSFADE_TO_B" },
@@ -74,7 +70,11 @@ export function transition(
             effects: [
               { type: "DUCK_AMBIENT" },
               { type: "TAKE_SCREENSHOT" },
-              { type: "START_TTS", text },
+              {
+                type: "START_TTS",
+                text,
+                piperVoiceIndex: context.reviewToRead?.piperVoiceIndex,
+              },
             ],
           };
         }

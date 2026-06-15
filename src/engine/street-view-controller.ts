@@ -4,6 +4,10 @@ import { Loader } from "@googlemaps/js-api-loader";
 import { getBotSettings } from "@/lib/bot-settings";
 import type { LatLng, StreetViewLink } from "@/lib/types";
 import { randomLatLngOffsetMeters } from "@/lib/wander-geo";
+import {
+  getWalkableOutdoorPanorama,
+  getWalkablePanoramaById,
+} from "./street-view-panorama-data";
 
 /** Shortest signed delta from `from` to `to` in degrees (−180…180). */
 function shortestAngleDelta(from: number, to: number): number {
@@ -31,8 +35,21 @@ export type StreetViewControllerOptions = {
   onImageryFault?: () => void;
 };
 
+export type StreetViewCanvasSample =
+  | {
+      available: true;
+      brightness: number;
+      width: number;
+      height: number;
+    }
+  | {
+      available: false;
+      reason: string;
+    };
+
 export class StreetViewController {
   private panorama: google.maps.StreetViewPanorama | null = null;
+  private streetViewService: google.maps.StreetViewService | null = null;
   /** Navigation / walk direction (deg). CSS may add a wander-only visual drift on top. */
   private currentHeading = 0;
   private isMoving = false;
@@ -48,6 +65,7 @@ export class StreetViewController {
   private headingMotionGeneration = 0;
   /** True while `runHeadingMotion` drives POV (pans / step blends). */
   private headingMotionInProgress = false;
+  private stepInProgress = false;
   /**
    * Wander look float is intentionally handled as a CSS transform on the
    * Street View layer. Calling `setPov` every frame can trigger extra imagery
@@ -60,7 +78,7 @@ export class StreetViewController {
     startCoords: LatLng,
     streetViewStart: StreetViewStartOptions | undefined,
     options: StreetViewControllerOptions,
-  ): Promise<void> {
+  ): Promise<LatLng> {
     this.options = options;
     const apiKey = process.env.NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY;
 
@@ -74,6 +92,7 @@ export class StreetViewController {
     });
 
     await loader.importLibrary("streetView");
+    this.streetViewService = new google.maps.StreetViewService();
 
     if (streetViewStart) {
       this.currentHeading = streetViewStart.heading;
@@ -94,10 +113,16 @@ export class StreetViewController {
           pitch,
         };
 
+    const walkableStart = streetViewStart
+      ? await this.findWalkablePanoById(streetViewStart.pano, startCoords)
+      : await this.findNearbyWalkableOutdoorPano(startCoords);
+
+    if (!walkableStart) {
+      throw new Error("No walkable outdoor Street View panorama found near start coordinates.");
+    }
+
     this.panorama = new google.maps.StreetViewPanorama(container, {
-      ...(streetViewStart
-        ? { pano: streetViewStart.pano }
-        : { position: startCoords }),
+      pano: walkableStart.pano,
       pov,
       zoom: 0,
       addressControl: false,
@@ -124,6 +149,8 @@ export class StreetViewController {
       this.panoChangedAt = Date.now();
       this.scheduleFaultCheck();
     });
+
+    return walkableStart.coords;
   }
 
   /** Street View reports OK — safe to drive POV without spamming failed tile fetches. */
@@ -204,69 +231,103 @@ export class StreetViewController {
       }));
   }
 
-  stepForward(): boolean {
+  async stepForward(): Promise<boolean> {
+    if (this.stepInProgress) return false;
     if (!this.panorama || !this.isImageryRenderable()) return false;
-    const links = this.getLinks();
-    if (links.length === 0) {
-      this.nudgeAwayFromDeadEndPanorama();
-      return false;
-    }
-
-    const sv = getBotSettings().streetView;
-    const linkMode = getBotSettings().linkSelectionMode;
-    let bestLink = links[0];
-
-    if (linkMode === "random_link") {
-      bestLink = links[Math.floor(Math.random() * links.length)];
-    } else {
-      const wobble =
-        linkMode === "straight" ? 0 : sv.wanderHeadingWobble;
-      let bestDelta = Number.POSITIVE_INFINITY;
-      for (const link of links) {
-        let delta = Math.abs(link.heading - this.currentHeading);
-        if (delta > 180) delta = 360 - delta;
-        delta += (Math.random() - 0.5) * wobble;
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestLink = link;
-        }
+    this.stepInProgress = true;
+    try {
+      const links = this.getLinks();
+      if (links.length === 0) {
+        await this.nudgeAwayFromDeadEndPanorama();
+        return false;
       }
+
+      const sv = getBotSettings().streetView;
+      const linkMode = getBotSettings().linkSelectionMode;
+      const candidates = this.rankLinks(links, linkMode, sv.wanderHeadingWobble);
+      const bestLink = await this.firstWalkableLink(candidates);
+
+      if (!bestLink) {
+        await this.nudgeAwayFromDeadEndPanorama();
+        return false;
+      }
+
+      this.cancelHeadingMotion();
+      this.panorama.setPano(bestLink.pano);
+
+      const pov = this.panorama.getPov();
+      const fromHeading = pov.heading ?? this.currentHeading;
+      const targetHeading = bestLink.heading;
+
+      void this.runHeadingMotion(
+        fromHeading,
+        targetHeading,
+        sv.stepHeadingBlendMs,
+        easeInOutQuint,
+        () => {
+          this.options.onSuccessfulStep?.();
+        },
+      );
+      return true;
+    } finally {
+      this.stepInProgress = false;
+    }
+  }
+
+  private rankLinks(
+    links: StreetViewLink[],
+    linkMode: string,
+    wanderHeadingWobble: number,
+  ): StreetViewLink[] {
+    if (linkMode === "random_link") {
+      return [...links].sort(() => Math.random() - 0.5);
     }
 
-    this.cancelHeadingMotion();
-    this.panorama.setPano(bestLink.pano);
+    const wobble = linkMode === "straight" ? 0 : wanderHeadingWobble;
+    return [...links].sort((a, b) => {
+      const aDelta = this.linkHeadingScore(a, wobble);
+      const bDelta = this.linkHeadingScore(b, wobble);
+      return aDelta - bDelta;
+    });
+  }
 
-    const pov = this.panorama.getPov();
-    const fromHeading = pov.heading ?? this.currentHeading;
-    const targetHeading = bestLink.heading;
+  private linkHeadingScore(link: StreetViewLink, wobble: number): number {
+    let delta = Math.abs(link.heading - this.currentHeading);
+    if (delta > 180) delta = 360 - delta;
+    return delta + (Math.random() - 0.5) * wobble;
+  }
 
-    void this.runHeadingMotion(
-      fromHeading,
-      targetHeading,
-      sv.stepHeadingBlendMs,
-      easeInOutQuint,
-      () => {
-        this.options.onSuccessfulStep?.();
-      },
-    );
-    return true;
+  private async firstWalkableLink(
+    links: StreetViewLink[],
+  ): Promise<StreetViewLink | null> {
+    if (!this.streetViewService) return links[0] ?? null;
+    for (const link of links) {
+      const data = await getWalkablePanoramaById(this.streetViewService, link.pano);
+      if (data) return link;
+    }
+    return null;
   }
 
   /**
    * User-contributed photospheres often have no outgoing links — jump a short distance so
    * Street View can snap to coverage with walkable links (avoids waiting for stuck-teleport).
    */
-  private nudgeAwayFromDeadEndPanorama(): void {
+  private async nudgeAwayFromDeadEndPanorama(): Promise<void> {
     if (!this.panorama) return;
     const pos = this.panorama.getPosition();
     if (!pos) return;
     const center = { lat: pos.lat(), lng: pos.lng() };
     const next = randomLatLngOffsetMeters(center, 28, 260);
+    const walkable = await this.findNearbyWalkableOutdoorPano(next);
+    if (!walkable) {
+      this.options.onImageryFault?.();
+      return;
+    }
     this.cancelHeadingMotion();
     this.hasSeenOkStatus = false;
     this.imageryFaultEmitted = false;
     this.panoChangedAt = Date.now();
-    this.panorama.setPosition(next);
+    this.panorama.setPano(walkable.pano);
     this.currentHeading = Math.random() * 360;
     this.applyNavPovOnly();
   }
@@ -358,22 +419,72 @@ export class StreetViewController {
     return this.runHeadingMotion(fromHeading, targetHeading, durationMs, easeInOutQuint);
   }
 
-  teleportTo(coords: LatLng): void {
-    if (!this.panorama) return;
+  async teleportTo(coords: LatLng): Promise<LatLng | null> {
+    if (!this.panorama) return null;
+    const walkable = await this.findNearbyWalkableOutdoorPano(coords);
+    if (!walkable) return null;
     this.cancelHeadingMotion();
     this.hasSeenOkStatus = false;
     this.imageryFaultEmitted = false;
     this.panoChangedAt = Date.now();
-    this.panorama.setPosition(coords);
+    this.panorama.setPano(walkable.pano);
     this.currentHeading = Math.random() * 360;
     this.applyNavPovOnly();
+    return walkable.coords;
+  }
+
+  private async findNearbyWalkableOutdoorPano(
+    coords: LatLng,
+  ): Promise<{ pano: string; coords: LatLng } | null> {
+    if (!this.streetViewService) return null;
+
+    const attempts = [
+      coords,
+      ...Array.from({ length: 8 }, () =>
+        randomLatLngOffsetMeters(coords, 20, 180),
+      ),
+    ];
+
+    for (const attempt of attempts) {
+      const data = await getWalkableOutdoorPanorama(
+        this.streetViewService,
+        attempt,
+      );
+      const pano = data?.location?.pano;
+      const latLng = data?.location?.latLng;
+      if (pano && latLng) {
+        return {
+          pano,
+          coords: { lat: latLng.lat(), lng: latLng.lng() },
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private async findWalkablePanoById(
+    pano: string,
+    fallbackCoords: LatLng,
+  ): Promise<{ pano: string; coords: LatLng } | null> {
+    if (!this.streetViewService) return null;
+    const data = await getWalkablePanoramaById(this.streetViewService, pano);
+    if (!data) return null;
+    const latLng = data.location?.latLng;
+    return {
+      pano,
+      coords: latLng
+        ? { lat: latLng.lat(), lng: latLng.lng() }
+        : fallbackCoords,
+    };
   }
 
   startWalking(intervalMs: number): void {
     if (this.isMoving) return;
     this.isMoving = true;
+    void this.stepForward();
     this.moveInterval = window.setInterval(() => {
-      this.stepForward();
+      void this.stepForward();
     }, intervalMs);
   }
 
@@ -384,7 +495,7 @@ export class StreetViewController {
       window.clearInterval(this.moveInterval);
     }
     this.moveInterval = window.setInterval(() => {
-      this.stepForward();
+      void this.stepForward();
     }, intervalMs);
   }
 
@@ -402,6 +513,47 @@ export class StreetViewController {
       (this.panorama as unknown as { getDiv?: () => HTMLElement } | null)?.getDiv?.() ||
       null
     );
+  }
+
+  sampleCanvasBrightness(): StreetViewCanvasSample {
+    try {
+      const container = this.getContainer();
+      const canvas = container?.querySelector("canvas");
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) {
+        return { available: false, reason: "no_canvas" };
+      }
+
+      const sampleSize = 8;
+      const scratch = document.createElement("canvas");
+      scratch.width = sampleSize;
+      scratch.height = sampleSize;
+      const ctx = scratch.getContext("2d", { willReadFrequently: true });
+      if (!ctx) {
+        return { available: false, reason: "no_2d_context" };
+      }
+
+      ctx.drawImage(canvas, 0, 0, sampleSize, sampleSize);
+      const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        total += (data[i]! + data[i + 1]! + data[i + 2]!) / 3;
+      }
+
+      return {
+        available: true,
+        brightness: total / (data.length / 4),
+        width: canvas.width,
+        height: canvas.height,
+      };
+    } catch (error) {
+      const reason =
+        typeof DOMException !== "undefined" &&
+        error instanceof DOMException &&
+        error.name
+          ? error.name
+          : "sample_failed";
+      return { available: false, reason };
+    }
   }
 
   destroy(): void {

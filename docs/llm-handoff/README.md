@@ -1,206 +1,156 @@
-# Would Not Recommend — LLM handoff document
+# Would Not Recommend - LLM Handoff
 
-This document describes the **would-not-recommend** project so another engineer or LLM can work on the codebase without prior context. It reflects the repository as of its last update; verify file paths and behavior against the tree when in doubt.
+This is a first-pass architecture handoff for future engineers or LLM sessions. Verify behavior against the current tree when in doubt.
 
----
+## Summary
 
-## One-line summary
+`would-not-recommend` is a Next.js 15 kiosk-style web app for an art installation. A bot wanders Google Street View within a configured region, periodically asks the local SQLite review corpus for nearby businesses, selects one-star reviews, and reads them aloud with browser/local TTS.
 
-**Next.js 15** kiosk-style web app: an autonomous **Google Street View** “bot” that wanders a configured region (default: Den Haag retail bounds), periodically queries **Google Places** for nearby businesses, selects a **one-star** review, and **reads it aloud** (Web Speech API) with ambient audio and UI. Session/review metadata is persisted in **SQLite** (`better-sqlite3`). A separate **activity terminal** view mirrors bot actions via **`BroadcastChannel`** (same browser, two tabs).
+The app does not scrape Google Maps pages and does not call Google Places APIs. Google is used for browser Street View imagery through Maps JavaScript API only.
 
----
-
-## Tech stack
+## Tech Stack
 
 | Layer | Choice |
-|--------|--------|
-| Framework | Next.js 15 (App Router), React 19 |
+| --- | --- |
+| Framework | Next.js 15 App Router, React 19, TypeScript |
 | Styling | Tailwind CSS 4 |
-| Maps | `@googlemaps/js-api-loader`, Maps **JavaScript** API — `streetView` library, `StreetViewPanorama` |
-| Server data | **better-sqlite3**, DB file under `data/db/would-not-recommend.db` |
-| Speech | `WebSpeechTTS` wrapper around `speechSynthesis` |
-| Audio | Web Audio API (`AudioEngine` — ambient loops, ducking, SFX) |
+| Street View | `@googlemaps/js-api-loader`, Maps JavaScript API |
+| Review/session data | SQLite through `better-sqlite3`, DB at `data/db/would-not-recommend.db` |
+| Speech/audio | Web Speech, local Piper/Kokoro TTS, Web Audio API |
+| Activity mirror | Browser `BroadcastChannel` |
 
----
-
-## How to run
+## Run And Verify
 
 ```bash
 npm install
-cp .env.example .env.local   # fill Google API keys
-npm run dev                  # http://localhost:3000 → redirects to /bot
-npm run build && npm start   # production
+cp .env.example .env.local
+npm run setup:piper
+npm run dev
 npm run typecheck
 npm run lint
+npm run build
+npm run test:no-google-places
 ```
 
----
+Populate local reviews with:
 
-## Environment variables
+```bash
+npm run import:reviews -- data/review-corpus.json
+```
 
-Defined in `.env.example` (copy to `.env.local`).
+For a second gallery laptop, use `docs/installation-laptop.md`.
+
+## Environment
 
 | Variable | Role |
-|----------|------|
-| `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` | **Maps JavaScript API** — loaded in the browser for Street View. Must be public (`NEXT_PUBLIC_*`). |
-| `GEOCODING_API_KEY` | **Geocoding API** — server route `src/app/api/geocode/route.ts`. |
-| `PLACES_API_KEY` | **Places API** — server route `src/app/api/places/route.ts`. Falls back to `GEOCODING_API_KEY` if unset. |
-| `NEXT_PUBLIC_KIOSK_MODE` | If `true`, `/bot` auto-starts the bot after a short delay (no click overlay). |
-| `NEXT_PUBLIC_ADMIN_PASSWORD` | Optional gate for `/admin`; empty = open in local dev. |
+| --- | --- |
+| `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` | Browser Street View and map rendering |
+| `NEXT_PUBLIC_KIOSK_MODE` | Auto-start `/bot` when true |
+| `TTS_ENGINE` | `piper` or `kokoro` |
+| `NEXT_PUBLIC_BOT_CCTV_OVERLAY` | Optional `/bot` overlay |
+| `NEXT_PUBLIC_ADMIN_PASSWORD` | Optional local admin gate |
+| `GSV_KIOSK` | `npm start` browser launcher toggle; `0` disables, `1` forces |
+| `GSV_KIOSK_URLS` | Optional comma-separated launcher paths; defaults to `/bot,/terminal` |
+| `GSV_KIOSK_MODE` | Launcher window mode: `app` or `kiosk`; multiple windows default to `app` |
+| `GSV_KIOSK_BOUNDS` | Optional semicolon-separated `x,y,width,height` window placement |
 
-**Note:** The same Google Cloud key can be reused across variables if all required APIs are enabled and key restrictions (HTTP referrers for browser, etc.) match your deployment.
+No Places API key is needed or used.
 
----
-
-## App routes (user-facing)
+## User-Facing Routes
 
 | Path | Purpose |
-|------|---------|
-| `/` | Server redirect → `/bot` (`src/app/page.tsx`). |
-| `/bot` | Main experience: Street View canvas, HUD, click-to-start (unless kiosk). Client-only bot via `useBot`. |
-| `/terminal` | Monospace activity log; subscribes to `src/lib/bot-activity.ts` `BroadcastChannel`. **Requires `/bot` open in another tab** (same origin, same browser profile). |
-| `/admin` | Dev/admin UI: bot tuning (`bot-settings` in `localStorage`), optional live activity mirror, health checks, recent reviews, teleport destination data. |
-| `/review-map` | Read-only one-off coverage map for local review corpus clusters, bot wander area, search radius, and spawn/teleport starts. |
-| `/tts-lab` | Read-only diagnostic page for auditioning local TTS engines, voices, speed, and subtitle timing against review samples. |
+| --- | --- |
+| `/bot` | Main kiosk experience |
+| `/terminal` | Same-browser activity mirror via `BroadcastChannel` |
+| `/monitor` | Persistent overnight run monitor and warning report |
+| `/review-map` | Local review corpus coverage map |
+| `/tts-lab` | Voice/subtitle timing lab using local review samples |
+| `/admin` | Local tuning and diagnostics when present in the tree |
 
----
+## API Routes
 
-## HTTP API routes (`src/app/api`)
+| Route | Purpose |
+| --- | --- |
+| `GET/POST /api/places` | Local SQLite place/review lookup and read marking |
+| `GET/POST /api/log` | Session and review logging |
+| `GET /api/log/recent` | Recent review logs |
+| `GET/POST /api/monitor/events` | Persistent bot activity events for overnight diagnostics |
+| `GET /api/monitor/report` | Latest/session monitor summary with warnings |
+| `GET /api/geocode` | Fixed installation city label (`The Hague`) |
+| `GET /api/review-map` | Local review map data |
+| `GET /api/tts-lab/reviews` | Local TTS sample rows |
+| `POST /api/tts` | Local speech synthesis endpoint |
+| `POST /api/screenshots` | Review screenshot persistence |
+| `GET /api/health` | Maps JS and local DB health |
 
-| Route | Role |
-|-------|------|
-| `GET/POST /api/log` | Session create/update, review log insert, aggregate stats (`src/lib/db.ts`). |
-| `GET /api/log/recent` | Recent review rows for admin. |
-| `GET /api/geocode` | Reverse geocode → city (and country for DB). |
-| `GET /api/places` | Nearby Search + Place Details/reviews; filters for target rating/length. |
-| `GET /api/review-map` | Local corpus places and one-star review counts for `/review-map`; read-only. |
-| `GET /api/tts-lab/reviews` | Small local review sample pack for `/tts-lab`; read-only. |
-| `POST /api/screenshots` | Saves JPEG from canvas data URL per review. |
-| `GET /api/health` | Key presence + DB ping (used by admin). |
-
----
-
-## High-level architecture
-
-```mermaid
-flowchart TB
-  subgraph client [Browser client]
-    BotPage["/bot page"]
-    Term["/terminal page"]
-    Admin["/admin page"]
-    Bot["Bot class"]
-    SVC["StreetViewController"]
-    SM["state-machine"]
-    RM["ReviewManager"]
-    BC["BroadcastChannel bot-activity"]
-    BotPage --> Bot
-    Bot --> SVC
-    Bot --> SM
-    Bot --> RM
-    Bot --> BC
-    Term --> BC
-    Admin --> BC
-  end
-  subgraph next [Next.js server]
-    API["Route Handlers /api/*"]
-    DB["SQLite"]
-  end
-  Bot --> API
-  API --> DB
-  RM --> API
-```
-
-- **`Bot`** (`src/engine/bot.ts`) orchestrates Street View, audio, TTS, teleportation, Places/review fetching, SQLite logging, and **activity posts** for the terminal.
-- **`StreetViewController`** (`src/engine/street-view-controller.ts`) wraps `StreetViewPanorama`: periodic **`stepForward()`** along links while “walking,” optional wander POV float (rAF loop), scripted pans for review flow, teleport by lat/lng.
-- **`state-machine`** (`src/engine/state-machine.ts`) pure transitions: `WANDER` → `DETECT` → `DELIVER` → `RETURN` → `WANDER`, with `TELEPORT` interrupt paths.
-- **`ReviewManager`** (`src/engine/review-manager.ts`) caches nearby places, fetches reviews, hashes read text to avoid repeats.
-- **`TeleportManager`** (`src/engine/teleport-manager.ts`) spawn/destination selection and “stuck” detection inside the wander region.
-- **`bot-settings`** (`src/lib/bot-settings.ts`) tunable timing, wander region, link mode, review selection, Street View float — persisted in `localStorage`, hot-reload hooks in `Bot` where applicable.
-
----
-
-## Bot states (`BotState` in `src/lib/types.ts`)
-
-| State | Meaning |
-|-------|---------|
-| `WANDER` | Walking along Street View links; HUD mode “Searching”. |
-| `DETECT` | Stopped, panning toward business, preparing review. |
-| `DELIVER` | TTS reading the review; screenshot taken. |
-| `RETURN` | Pan back to wander heading, then resume walking. |
-| `TELEPORT` | Fade, jump to new coordinates (stuck, imagery fault, or interrupt). |
-
-Events include `BUSINESS_DETECTED`, `DETECT_COMPLETE`, `DELIVER_COMPLETE`, `RETURN_COMPLETE`, `TELEPORT_*`, `STUCK_DETECTED`.
-
----
-
-## Wander vs “many network requests”
-
-- **Application steps:** `startWalking` uses `setInterval` to call `stepForward()` at **`wanderStepInterval`** (default **15s** from config unless overridden by bot settings) — not per-frame navigation.
-- **Street View imagery:** Google’s viewer loads tiles/CDN assets (`streetviewpixels`, `ggpht.com`, etc.). The ambient **wander look float** is CSS-only, so it does not call `setPov` every frame. Real POV changes are reserved for step heading blends and scripted pans. 429s are usually **imagery/CDN throttling**, not your Places API call rate. Tuning: `wanderLookFloatEnabled` / sway in bot settings or `STREET_VIEW` defaults in `src/lib/config.ts`.
-
----
-
-## Activity logging (`/terminal` and admin)
-
-- Module: `src/lib/bot-activity.ts` — `postActivity(tag, lines)`, `subscribeActivity`.
-- **`Bot`** emits structured lines: `SESSION`, `SEARCHING` (per successful wander **step**), `STOP` / `WALK`, `STATE` (once per state change, not `WANDER`), `REVIEW` (compact metadata + body), `TELEPORT`, etc., with **lat/lng/city** on movement-related tags where implemented.
-- Messages are **not** persisted server-side for the terminal; refresh clears the view. **BroadcastChannel** does not cross browsers/machines.
-
----
-
-## Persistence (`src/lib/db.ts`)
-
-- **`review_log`**: per-review rows (session, coords, city, business, text, rating, TTS duration, screenshot filename).
-- **`sessions`**: rolling stats per bot session id.
-- **`countries_visited`**: deduplicated country list from geocode.
-
----
-
-## Important file map
+## Core Files
 
 | Path | Role |
-|------|------|
-| `src/app/bot/page.tsx` | Main Street View UI shell. |
-| `src/app/terminal/page.tsx` | Activity log UI. |
-| `src/app/admin/page.tsx` | Settings + diagnostics. |
-| `src/engine/bot.ts` | Core orchestration. |
-| `src/engine/state-machine.ts` | State transitions and effect list. |
-| `src/engine/street-view-controller.ts` | Panorama + walking + pans. |
-| `src/hooks/useBot.ts` | React hook: single `Bot` instance lifecycle. |
-| `src/lib/config.ts` | Defaults: timing, Hague region, Places/review filters, `STREET_VIEW` tuning. |
-| `data/teleport-destinations.json` | Teleport targets (used with admin / `TeleportManager`). |
+| --- | --- |
+| `src/app/bot/page.tsx` | Main Street View UI |
+| `src/engine/bot.ts` | Orchestration: walking, detection, TTS, logging, teleports |
+| `src/engine/review-manager.ts` | Local candidate cache, review filtering, repeat suppression |
+| `src/engine/street-view-controller.ts` | Street View panorama wrapper and movement/camera behavior |
+| `src/engine/state-machine.ts` | Bot state transitions |
+| `src/lib/db.ts` | SQLite schema, local corpus lookup, read history |
+| `src/lib/config.ts` | Default timing, region, local review query, review, and Street View settings |
+| `src/lib/bot-settings.ts` | Settings adapter over defaults |
+| `docs/local-review-database.md` | Supported local review schemas and import notes |
+| `docs/how-the-bot-works.md` | Plain-English behavior description |
 
----
+## Behavior Notes
 
-## Product / UX notes
+- `/api/places` always serves local SQLite data.
+- When a review target is selected, the bot stops walking, pans toward the business, reads the review while stopped, then returns to its wander heading before moving again.
+- `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
+- `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.
+- `/api/tts` sanitizes only the Piper-bound copy by normalizing Unicode and removing unsafe hidden control characters plus surrogate code units; subtitles keep the original review text. On synthesis failure, check the server console for full Piper stderr plus place/review context.
+- `ReviewManager` queries local nearby candidates after enough time and movement have passed.
+- Local nearby lookup is nearest-neighbor, capped by `PLACES.LOCAL_CORPUS_NEAREST_PLACE_LIMIT`.
+- Boundary recovery prevents the bot from wandering silently outside the review corpus. After `PLACES.OUT_OF_REGION_STEPS_BEFORE_FALLBACK_REVIEW` outside-region Street View steps, `/bot` may query reviews from an in-region fallback anchor while preserving the real bot bearing for camera motion. After `PLACES.OUT_OF_REGION_STEPS_BEFORE_TELEPORT` outside-region steps, it triggers a normal `boundary_exit` teleport back into the configured review region.
+- Exact review repeat history is tracked in memory and persisted in corpus rows when supported. In-memory session history is timestamped: the current `/bot` tab avoids the same review hash for `sessionReviewRepeatCooldownMinutes` (default 30), then may reuse it if needed for cadence.
+- `/terminal` is same-browser, same-origin only; it is not a persisted multi-device feed.
+- `npm start` uses `scripts/start-with-kiosk.cjs` to launch production
+  presentation windows after the server is ready. On Windows it defaults to
+  `/bot` plus `/terminal` using one shared browser profile so `BroadcastChannel`
+  still works across the two displays.
+- `/monitor` persists the same activity stream to SQLite in `bot_events`, then
+  summarizes long runs for review droughts, event silence, stalled non-wander
+  states, boundary recovery, frequent teleports, `/bot` runtime
+  visibility/heartbeat signals, black frames, and Google imagery HTTP 429/503
+  errors when the browser exposes those status codes.
+- `src/hooks/useRuntimeEnvironmentMonitor.ts` emits `RUNTIME` events after the
+  bot starts: heartbeat, heartbeat_gap, visibilitychange, focus/blur,
+  pagehide/pageshow, freeze/resume, online/offline, resize, and screen/window
+  snapshots. Treat these as evidence of browser/display/OS throttling; they
+  cannot log during actual machine sleep, only before and after it.
+- `src/hooks/useScreenWakeLock.ts` requests the browser Screen Wake Lock API
+  while `/bot` is started, and records wake-lock acquired/released/failed or
+  unsupported events as `RUNTIME` activity. This is advisory and depends on the
+  tab staying visible plus OS/browser policy allowing the lock.
+- Street View imagery/CDN throttling is separate from review lookup. The bot watches repeated 429/5xx imagery responses and temporarily slows wander steps; avoid per-frame `setPov` behavior.
+- Street View starts, teleports, nudges, and linked steps are filtered through `StreetViewService` in `src/engine/street-view-panorama-data.ts`. Coordinate searches use `StreetViewSource.OUTDOOR`, and candidate panos must have at least one outgoing link so the bot does not spawn in or step into non-walkable photospheres.
+- Maps imagery diagnostics are client-only. `src/lib/maps-cdn-stress.ts` observes Street View imagery failures, `Bot` publishes `MAPS` activity lines, and `StreetViewController.sampleCanvasBrightness()` best-effort samples the Street View canvas. These diagnostics must not add Street View API calls or per-frame camera updates.
+- The wandering camera wiggle is CSS-only in `VisualEffects`; it transforms the
+  rendered Street View layer locally and must not drive Google `setPov` updates.
 
-- **Title / SEO:** `src/app/layout.tsx` — “Would Not Recommend”, Street View installation reading one-star reviews.
-- **Visual layer:** `VisualEffects`, `HUD` show mode, coords, city, session timer, review counts.
-- **Kiosk:** auto-start on `/bot` when `NEXT_PUBLIC_KIOSK_MODE=true`.
+## Local Review Corpus
 
----
+Supported table families:
 
-## Follow-up work (not exhaustive)
+- `offline_places` / `offline_reviews`
+- `review_corpus_places` / `review_corpus_reviews`
 
-- Terminal across devices would need **SSE/WebSocket** or polling, not only `BroadcastChannel`.
-- Rate limits / 429 on Google imagery: reduce POV update frequency, check Cloud quotas and key restrictions.
-- Keep this document updated when adding routes, env vars, or major engine changes.
+Local read history columns:
 
-## Local review corpus
+- `read_count`
+- `last_read_at`
+- `last_selected_at`
 
-The app can run review selection from SQLite instead of Google Places by setting `REVIEW_SOURCE=local`. Import rows with `npm run import:reviews -- data/review-corpus.json` or a CSV with equivalent columns. The importer also accepts Google one-star review exports with `place_lat`, `place_lng`, `place_name`, `place_url`, `rating`, `review_text`, and `username`. It writes `review_corpus_places` and `review_corpus_reviews`; `/api/places` keeps the same GET/POST shape for the client bot, but serves nearby places and reviews from those tables.
+See `docs/local-review-database.md` for import formats and schema details.
 
-Use `/review-map` to inspect the local corpus spatially. It reads `GET /api/review-map`, draws one-star review clusters, the configured wander area, search radius, and custom/default spawn points. The page is diagnostic only and does not alter settings or database rows.
+## Regression Guard
 
-Local corpus review rows persist read history in `read_count`, `last_read_at`, and `last_selected_at`. The default exact-review repeat cooldown is 180 minutes. Local `/api/places` prefers unread or cooled-down reviews; if a place has no cooled-down matching reviews, it can return the oldest read review as a fallback so the installation does not go quiet. Different one-star reviews from the same place remain eligible.
+`npm run test:no-google-places` scans runtime source and `.env.example` for old Places API paths, env toggles, and pagination settings. Keep it green when changing review lookup behavior.
 
-Use `/tts-lab` to test review readout before changing the kiosk. It fetches samples from `GET /api/tts-lab/reviews` and sends per-request engine/voice/speed options to `POST /api/tts`.
-
-Current local TTS defaults to Piper via `.venv-piper` and the voice models in `vendor/piper-voices`. Kokoro remains available when `TTS_ENGINE=kokoro`, using `.venv-kokoro` and `scripts/kokoro-synth.py`.
-
----
-
-## Document maintenance
-
-**Location:** `docs/llm-handoff/README.md`  
-**Audience:** Future maintainers and LLM sessions — update when architecture or env surface changes materially.
+`npm run test:street-view-css-wiggle` guards the local-only wandering wiggle so it stays subtle and does not call Google Street View POV APIs.

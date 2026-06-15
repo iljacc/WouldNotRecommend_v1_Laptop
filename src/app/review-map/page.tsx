@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import destinations from "../../../data/teleport-destinations.json";
 import {
   createDefaultBotSettings,
-  getBotSettings,
   isLatLngInWanderRegion,
   type BotSettings,
   type WanderRegion,
@@ -94,14 +93,10 @@ export default function ReviewMapPage() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlayCleanup = useRef<(() => void)[]>([]);
   const [places, setPlaces] = useState<ReviewMapPlace[]>([]);
-  const [settings, setSettings] = useState<BotSettings>(() => createDefaultBotSettings());
+  const [settings] = useState<BotSettings>(() => createDefaultBotSettings());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ReviewMapPlace | null>(null);
-
-  useEffect(() => {
-    setSettings(getBotSettings());
-  }, []);
 
   useEffect(() => {
     let cancelled = false;

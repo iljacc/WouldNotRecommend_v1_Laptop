@@ -11,6 +11,7 @@ type ApiPlace = {
   name: string;
   location: LatLng;
   types: string[];
+  source?: "local";
   rating?: number;
   totalRatings?: number;
 };
@@ -99,7 +100,9 @@ function pruneStaleReviewReads(
 export function filterReviews(
   reviews: Review[],
   readAt: Map<string, number>,
-  options?: { ignoreReadCooldown?: boolean },
+  options?: {
+    ignoreReadCooldown?: boolean;
+  },
 ): Review[] {
   const { reviews: revCfg } = getBotSettings();
   const cooldownMs = revCfg.reviewRepeatCooldownMinutes * 60 * 1000;
@@ -146,7 +149,7 @@ export function selectReview(
   }
 }
 
-/** Sort POIs for 1★ hunt: closest first, then lower Google rating, then more total ratings. */
+/** Sort POIs for 1-star hunt: closest first, then lower imported rating, then more total ratings. */
 function compareCandidates(a: DetectedBusiness, b: DetectedBusiness): number {
   if (a.distance !== b.distance) return a.distance - b.distance;
   const ra = a.rating ?? 999;
@@ -158,14 +161,11 @@ function compareCandidates(a: DetectedBusiness, b: DetectedBusiness): number {
 export class ReviewManager {
   private cachedBusinesses: DetectedBusiness[] = [];
   private readonly placeIdsSeen = new Set<string>();
+  private readonly sessionReadReviewAtByHash = new Map<string, number>();
   /** placeId → epoch ms when marked exhausted (no passing review). */
   private exhaustedPlaceAt = new Map<string, number>();
   private lastQueryCoords: LatLng | null = null;
   private lastQueryTime = 0;
-
-  /** Lazy Nearby pagination (same anchor until `shouldQuery` resets). */
-  private nearbyNextPageToken: string | null = null;
-  private nearbyPagesLoaded = 0;
 
   constructor(private readonly readAtByHash: Map<string, number>) {}
 
@@ -176,8 +176,6 @@ export class ReviewManager {
     this.placeIdsSeen.clear();
     this.lastQueryCoords = null;
     this.lastQueryTime = 0;
-    this.nearbyNextPageToken = null;
-    this.nearbyPagesLoaded = 0;
   }
 
   getCachedPlaceCount(): number {
@@ -202,6 +200,15 @@ export class ReviewManager {
     return true;
   }
 
+  private isReviewInSessionCooldown(
+    hash: string,
+    now: number,
+    cooldownMs: number,
+  ): boolean {
+    const selectedAt = this.sessionReadReviewAtByHash.get(hash);
+    return selectedAt !== undefined && now - selectedAt < cooldownMs;
+  }
+
   shouldQuery(currentCoords: LatLng): boolean {
     const places = getBotSettings().places;
     const now = Date.now();
@@ -214,27 +221,25 @@ export class ReviewManager {
   }
 
   /**
-   * First Nearby page at this anchor (lazy). Resets merged list + pagination state.
+   * Nearest local corpus places at this anchor. Resets the local candidate list.
    */
-  async fetchNearbyBusinessesFirstPage(
+  async fetchNearbyBusinesses(
     currentCoords: LatLng,
+    options?: { bearingFromCoords?: LatLng },
   ): Promise<DetectedBusiness[]> {
     const { wanderRegion, places } = getBotSettings();
+    const bearingFromCoords = options?.bearingFromCoords ?? currentCoords;
     this.lastQueryCoords = { ...currentCoords };
     this.lastQueryTime = Date.now();
 
     this.cachedBusinesses = [];
     this.placeIdsSeen.clear();
-    this.nearbyNextPageToken = null;
-    this.nearbyPagesLoaded = 0;
 
     try {
       const params = new URLSearchParams({
         lat: String(currentCoords.lat),
         lng: String(currentCoords.lng),
         radius: String(places.searchRadius),
-        lazy: "1",
-        cacheTtlMs: String(places.nearbyCacheTtlMs),
         targetRating: String(getBotSettings().reviews.targetRating),
       });
       const response = await fetch(`/api/places?${params.toString()}`);
@@ -244,10 +249,7 @@ export class ReviewManager {
       }>(response, "Nearby places");
 
       const raw = data.places || [];
-      this.nearbyPagesLoaded = 1;
-      this.nearbyNextPageToken = data.nextPageToken ?? null;
-
-      this.mergePlacesFromNearbyResponse(raw, currentCoords, wanderRegion);
+      this.mergePlacesFromNearbyResponse(raw, bearingFromCoords, wanderRegion);
 
       return this.cachedBusinesses;
     } catch (error) {
@@ -273,6 +275,7 @@ export class ReviewManager {
         name: place.name,
         location: place.location,
         types: place.types,
+        source: place.source,
         bearing: bearing(currentCoords, place.location),
         distance: haversineDistance(currentCoords, place.location),
         rating: place.rating,
@@ -281,79 +284,51 @@ export class ReviewManager {
     }
   }
 
-  /** More Nearby results at the same anchor (uses `next_page_token`). Returns count of new POIs. */
-  async fetchNearbyNextPage(currentCoords: LatLng): Promise<number> {
-    const cap = Math.min(
-      3,
-      Math.max(1, getBotSettings().places.nearbySearchMaxPages),
-    );
-    const token = this.nearbyNextPageToken;
-    if (!token || this.nearbyPagesLoaded >= cap) {
-      return 0;
-    }
-
-    const { wanderRegion } = getBotSettings();
-
-    try {
-      const params = new URLSearchParams({
-        pageToken: token,
-      });
-      const response = await fetch(`/api/places?${params.toString()}`);
-      const data = await readApiJson<{
-        places?: ApiPlace[];
-        nextPageToken?: string | null;
-      }>(response, "Nearby places next page");
-
-      const raw = data.places || [];
-      const before = this.cachedBusinesses.length;
-      this.mergePlacesFromNearbyResponse(raw, currentCoords, wanderRegion);
-      const added = this.cachedBusinesses.length - before;
-
-      this.nearbyPagesLoaded += 1;
-      this.nearbyNextPageToken = data.nextPageToken ?? null;
-
-      return added;
-    } catch (error) {
-      console.error("Failed to fetch nearby next page:", error);
-      return 0;
-    }
-  }
-
-  canLoadMoreNearbyPages(): boolean {
-    const cap = Math.min(
-      3,
-      Math.max(1, getBotSettings().places.nearbySearchMaxPages),
-    );
-    return (
-      Boolean(this.nearbyNextPageToken) && this.nearbyPagesLoaded < cap
-    );
-  }
-
   /**
    * Non-exhausted POIs in detection radius, sorted for 1★ discovery.
    */
-  findSortedCandidateBusinesses(currentCoords: LatLng): DetectedBusiness[] {
+  findSortedCandidateBusinesses(
+    currentCoords: LatLng,
+    options?: {
+      allowOutOfRegionFallback?: boolean;
+      bearingFromCoords?: LatLng;
+    },
+  ): DetectedBusiness[] {
     const { wanderRegion, places } = getBotSettings();
     const now = Date.now();
     this.pruneStaleExhausted(now);
 
-    if (!isLatLngInWanderRegion(currentCoords, wanderRegion)) {
+    if (
+      !options?.allowOutOfRegionFallback &&
+      !isLatLngInWanderRegion(currentCoords, wanderRegion)
+    ) {
       return [];
     }
+    const bearingFromCoords = options?.bearingFromCoords ?? currentCoords;
 
     return this.cachedBusinesses
       .filter((business) => !this.isPlaceExhausted(business.placeId, now))
       .map((business) => ({
         ...business,
-        bearing: bearing(currentCoords, business.location),
-        distance: haversineDistance(currentCoords, business.location),
+        bearing: bearing(bearingFromCoords, business.location),
+        distance: haversineDistance(bearingFromCoords, business.location),
       }))
-      .filter((business) => business.distance <= places.detectionRadius)
+      .filter(
+        (business) =>
+          business.source === "local" ||
+          business.distance <= places.detectionRadius,
+      )
       .sort(compareCandidates);
   }
 
-  findNearestBusiness(currentCoords: LatLng): DetectedBusiness | null {
-    const sorted = this.findSortedCandidateBusinesses(currentCoords);
+  findNearestBusiness(
+    currentCoords: LatLng,
+    options?: {
+      allowOutOfRegionFallback?: boolean;
+      bearingFromCoords?: LatLng;
+    },
+  ): DetectedBusiness | null {
+    const sorted = this.findSortedCandidateBusinesses(currentCoords, options);
     return sorted[0] ?? null;
   }
 
@@ -383,15 +358,33 @@ export class ReviewManager {
         ...review,
         hash: hashReview(review.text),
       }));
-      const usedRecentFallback = reviews.some((review) => review.usedRecentFallback);
-      const filtered = filterReviews(reviews, this.readAtByHash, {
-        ignoreReadCooldown: usedRecentFallback,
+      const allowHistoricalFallback = reviews.some(
+        (review) => review.usedRecentFallback,
+      );
+      const sessionCooldownMs =
+        getBotSettings().reviews.sessionReviewRepeatCooldownMinutes * 60 * 1000;
+      pruneStaleReviewReads(
+        this.sessionReadReviewAtByHash,
+        sessionCooldownMs,
+        now,
+      );
+      const sessionFreshReviews = reviews.filter(
+        (review) =>
+          !this.isReviewInSessionCooldown(
+            review.hash,
+            now,
+            sessionCooldownMs,
+          ),
+      );
+      const filtered = filterReviews(sessionFreshReviews, this.readAtByHash, {
+        ignoreReadCooldown: allowHistoricalFallback,
       });
       const mode = getBotSettings().reviewSelectionMode;
       const selected = selectReview(filtered, mode);
 
       if (selected) {
-        this.readAtByHash.set(selected.hash, Date.now());
+        this.sessionReadReviewAtByHash.set(selected.hash, now);
+        this.readAtByHash.set(selected.hash, now);
         if (data.source === "local") {
           const sourceReview = reviews.find((review) => review.hash === selected.hash);
           void fetch("/api/places", {

@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
@@ -8,6 +8,7 @@ import {
   PIPER_VOICE_INDEX,
   PIPER_VOICE_MODEL_FILES,
 } from "@/lib/piper-config";
+import { sanitizePiperText } from "@/lib/tts-sanitize";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -27,6 +28,14 @@ type TtsRequestBody = {
   piperLengthScale?: unknown;
   kokoroVoice?: unknown;
   kokoroSpeed?: unknown;
+  ttsContext?: unknown;
+};
+
+type TtsContext = {
+  placeId?: string;
+  reviewId?: string;
+  businessName?: string;
+  source?: string;
 };
 
 function defaultPiperCommand(): PiperCommand {
@@ -53,6 +62,27 @@ function defaultKokoroPython(): string {
   if (fs.existsSync(win)) return win;
   if (fs.existsSync(unix)) return unix;
   return "python";
+}
+
+function readContext(value: unknown): TtsContext {
+  if (!value || typeof value !== "object") return {};
+  const source = value as Record<string, unknown>;
+  return {
+    placeId: readContextString(source.placeId),
+    reviewId: readContextString(source.reviewId),
+    businessName: readContextString(source.businessName),
+    source: readContextString(source.source),
+  };
+}
+
+function readContextString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim().slice(0, 240)
+    : undefined;
+}
+
+function shortHash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 16);
 }
 
 async function runProcess(options: {
@@ -122,9 +152,23 @@ export async function POST(request: Request): Promise<Response> {
 
   const requestedEngine = typeof body.engine === "string" ? body.engine : "";
   const engine = (requestedEngine || process.env.TTS_ENGINE || DEFAULT_TTS_ENGINE).toLowerCase();
+  const ttsContext = readContext(body.ttsContext);
   let code: number | null = null;
   let stderr = "";
   let failureLabel = "TTS synthesis failed";
+  let piperSanitization:
+    | {
+        originalLength: number;
+        sanitizedLength: number;
+        removedControlChars: number;
+        removedSurrogateChars: number;
+        removedFormatChars: number;
+        removedNonAsciiChars: number;
+        replacedPunctuationChars: number;
+        originalHash: string;
+        sanitizedHash: string;
+      }
+    | null = null;
 
   if (engine === "kokoro") {
     const kokoroPython = process.env.KOKORO_PYTHON_PATH ?? defaultKokoroPython();
@@ -197,6 +241,25 @@ export async function POST(request: Request): Promise<Response> {
         : null;
     const speedArgs = piperLengthScale === null ? [] : ["--length_scale", String(piperLengthScale)];
 
+    const sanitized = sanitizePiperText(text);
+    if (!sanitized.text.length) {
+      return NextResponse.json(
+        { error: "Text is empty after Piper sanitization" },
+        { status: 400 },
+      );
+    }
+    piperSanitization = {
+      originalLength: text.length,
+      sanitizedLength: sanitized.text.length,
+      removedControlChars: sanitized.removedControlChars,
+      removedSurrogateChars: sanitized.removedSurrogateChars,
+      removedFormatChars: sanitized.removedFormatChars,
+      removedNonAsciiChars: sanitized.removedNonAsciiChars,
+      replacedPunctuationChars: sanitized.replacedPunctuationChars,
+      originalHash: shortHash(text),
+      sanitizedHash: shortHash(sanitized.text),
+    };
+
     const result = await runProcess({
       command: piperCommand.command,
       args: [
@@ -207,7 +270,7 @@ export async function POST(request: Request): Promise<Response> {
         "--output_file",
         outPath,
       ],
-      stdinText: `${text}\n`,
+      stdinText: `${sanitized.text}\n`,
     });
     code = result.code;
     stderr = result.stderr;
@@ -215,6 +278,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (code !== 0) {
+    console.error("TTS synthesis process failed", {
+      engine,
+      failureLabel,
+      exitCode: code,
+      context: ttsContext,
+      piperSanitization,
+      textPreview: text.replace(/\s+/g, " ").slice(0, 240),
+      fullStderr: stderr,
+    });
     cleanup();
     return NextResponse.json(
       {

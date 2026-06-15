@@ -25,9 +25,20 @@ pnpm-debug.log*
 # Piper TTS temp WAVs (api/tts)
 .tmp/
 
+# Downloaded Piper voice models
+vendor/piper-voices/
+
 # Project data
-data/db/
+data/db/*.db-wal
+data/db/*.db-shm
+data/db/*.sqlite-wal
+data/db/*.sqlite-shm
+data/exports/
 data/screenshots/
+
+# Python caches
+__pycache__/
+*.py[cod]
 
 # GeoNames cache (local-reverse-geocoder)
 .cache/

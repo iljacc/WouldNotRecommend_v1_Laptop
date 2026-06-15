@@ -79,19 +79,23 @@ export interface DetectedBusiness {
   name: string;
   location: LatLng;
   types: string[];
+  /** Local SQLite corpus candidates are nearest-neighbor; Google candidates remain radius-gated. */
+  source?: "local";
   bearing: number;
   distance: number;
-  /** From Nearby Search when available — used to prefer lower-rated POIs for 1★ hunt. */
+  /** Imported aggregate rating when available; used to prefer lower-rated POIs for 1-star hunt. */
   rating?: number;
   totalRatings?: number;
 }
 
 export interface Review {
+  reviewId?: string;
   text: string;
   rating: number;
   authorName: string;
   relativeTimeDescription: string;
   hash: string;
+  piperVoiceIndex?: number;
 }
 
 export interface ReviewLogEntry {
@@ -122,11 +126,77 @@ export interface SessionStats {
   totalTeleports: number;
 }
 
+export type BotMonitorEventInput = {
+  sessionId?: string;
+  timestamp?: string;
+  tag: string;
+  message: string;
+  lat?: number;
+  lng?: number;
+  state?: string;
+  statusCode?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type BotMonitorEvent = Required<
+  Pick<BotMonitorEventInput, "tag" | "message">
+> & {
+  id: number;
+  sessionId: string;
+  timestamp: string;
+  lat: number | null;
+  lng: number | null;
+  state: string;
+  statusCode: number | null;
+  metadata: Record<string, unknown>;
+};
+
+export type BotMonitorWarning = {
+  level: "info" | "warning" | "critical";
+  code: string;
+  message: string;
+  since?: string;
+};
+
+export type BotMonitorReport = {
+  sessionId: string;
+  startedAt: string;
+  lastEventAt: string;
+  runtimeSeconds: number;
+  totalEvents: number;
+  countsByTag: Record<string, number>;
+  statusCounts: Record<number, number>;
+  reviewsRead: number;
+  teleports: number;
+  boundaryEvents: number;
+  mapsErrors: number;
+  runtimeEvents: number;
+  runtimeHeartbeatGaps: number;
+  runtimeHiddenEvents: number;
+  runtimeBlurEvents: number;
+  lastRuntime: BotMonitorEvent | null;
+  lastReview: BotMonitorEvent | null;
+  lastError: BotMonitorEvent | null;
+  warnings: BotMonitorWarning[];
+  recentEvents: BotMonitorEvent[];
+};
+
 export type AmbientLayer = "A" | "B";
 
 export interface TtsSpeakOptions {
   /** Called with how many leading characters should be shown (typewriter / sync with speech). */
   onReveal?: (revealedCharCount: number) => void;
+  /** Piper voice model index for this utterance. */
+  piperVoiceIndex?: number;
+  /** Piper length scale; lower is faster, higher is slower. */
+  piperLengthScale?: number;
+  /** Identifiers logged server-side when local synthesis fails. */
+  ttsContext?: {
+    placeId?: string;
+    reviewId?: string;
+    businessName?: string;
+    source?: string;
+  };
 }
 
 export interface TTSEngine {

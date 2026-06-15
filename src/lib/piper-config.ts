@@ -2,7 +2,7 @@ import path from "path";
 
 /**
  * Piper ONNX models under `vendor/piper-voices/`.
- * Set `PIPER_VOICE_INDEX` so `/api/tts` uses that file:
+ * Set `PIPER_VOICE_INDEX` so `/api/tts` and the live bot use that file:
  *   0 lessac · 1 amy · 2 ryan · 3 joe · 4 hfc_female · 5 norman · 6 libritts_r
  */
 export const PIPER_VOICE_MODEL_FILES = [
@@ -15,7 +15,7 @@ export const PIPER_VOICE_MODEL_FILES = [
   "en_US-libritts_r-medium.onnx",
 ] as const;
 
-export const PIPER_VOICE_INDEX = 1;
+export const PIPER_VOICE_INDEX = 2;
 
 export function getPiperModelPath(index: number): string {
   const file = PIPER_VOICE_MODEL_FILES[index];

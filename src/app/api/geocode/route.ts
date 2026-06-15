@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { lookupCityCountryOffline } from "@/lib/offline-reverse-geocode";
 
 export const runtime = "nodejs";
 
 /**
- * Reverse-geocode client-supplied lat/lng (bot spawn) using bundled GeoNames data —
- * no Google or other remote geocoding APIs.
+ * Fixed installation label for the Den Haag kiosk region.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -30,30 +28,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  try {
-    const hit = await lookupCityCountryOffline(latN, lngN);
-    if (!hit) {
-      return NextResponse.json({
-        city: "Unknown",
-        country: null,
-        lookupStatus: "EMPTY",
-      });
-    }
-
-    const display = `${hit.city}, ${hit.country}`;
-    return NextResponse.json({
-      city: display,
-      country: hit.country,
-      lookupStatus: "OK",
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Offline geocode error:", error);
-    return NextResponse.json({
-      city: "Unknown",
-      country: null,
-      lookupStatus: "ERROR",
-      ...(process.env.NODE_ENV === "development" ? { detail: message } : {}),
-    });
-  }
+  return NextResponse.json({
+    city: "The Hague",
+    country: "Netherlands",
+    lookupStatus: "FIXED",
+  });
 }

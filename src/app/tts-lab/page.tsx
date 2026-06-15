@@ -126,6 +126,9 @@ export default function TtsLabPage() {
         piperLengthScale,
         kokoroVoice,
         kokoroSpeed,
+        ttsContext: {
+          source: "tts-lab",
+        },
       }),
     });
 

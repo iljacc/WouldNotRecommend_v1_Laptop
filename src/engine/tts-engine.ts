@@ -8,11 +8,37 @@ export class PiperTTS implements TTSEngine {
   private speaking = false;
   private revealRaf: number | null = null;
   private stopped = false;
+  private prepared:
+    | {
+        key: string;
+        promise: Promise<AudioBuffer>;
+      }
+    | null = null;
 
   constructor(private readonly audio: AudioEngine) {}
 
   speak(text: string, options?: TtsSpeakOptions): Promise<void> {
     return this.speakInner(text.trim(), options);
+  }
+
+  prepare(
+    text: string,
+    options?: Pick<TtsSpeakOptions, "piperVoiceIndex" | "piperLengthScale" | "ttsContext">,
+  ): void {
+    const normalized = text.trim();
+    if (!normalized.length) return;
+    const key = this.cacheKey(normalized, options);
+    if (this.prepared?.key === key) return;
+    const promise = this.fetchAndDecode(normalized, options);
+    void promise.catch(() => {
+      if (this.prepared?.key === key) {
+        this.prepared = null;
+      }
+    });
+    this.prepared = {
+      key,
+      promise,
+    };
   }
 
   private async speakInner(text: string, options?: TtsSpeakOptions): Promise<void> {
@@ -25,20 +51,31 @@ export class PiperTTS implements TTSEngine {
 
     this.speaking = true;
 
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
+    const key = this.cacheKey(text, options);
+    const prepared = this.prepared?.key === key ? this.prepared.promise : null;
+    let buffer: AudioBuffer;
+    try {
+      buffer = await (prepared ?? this.fetchAndDecode(text, options));
+    } catch (error) {
+      if (!prepared) {
+        this.speaking = false;
+        throw error;
+      }
 
-    if (!res.ok) {
-      this.speaking = false;
-      const err = await res.text();
-      throw new Error(`TTS failed (${res.status}): ${err.slice(0, 200)}`);
+      if (this.prepared?.key === key) {
+        this.prepared = null;
+      }
+
+      try {
+        buffer = await this.fetchAndDecode(text, options);
+      } catch (retryError) {
+        this.speaking = false;
+        throw retryError;
+      }
     }
-
-    const ab = await res.arrayBuffer();
-    const buffer = await this.audio.decodeAudioData(ab);
+    if (this.prepared?.key === key) {
+      this.prepared = null;
+    }
     const duration = buffer.duration;
     const ctx = this.audio.getAudioContext();
 
@@ -74,6 +111,44 @@ export class PiperTTS implements TTSEngine {
     }
   }
 
+  private cacheKey(
+    text: string,
+    options?: Pick<TtsSpeakOptions, "piperVoiceIndex" | "piperLengthScale">,
+  ): string {
+    return JSON.stringify({
+      text,
+      engine: "piper",
+      piperVoiceIndex: options?.piperVoiceIndex ?? null,
+      piperLengthScale: options?.piperLengthScale ?? null,
+    });
+  }
+
+  private async fetchAndDecode(
+    text: string,
+    options?: Pick<TtsSpeakOptions, "piperVoiceIndex" | "piperLengthScale" | "ttsContext">,
+  ): Promise<AudioBuffer> {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        engine: "piper",
+        piperVoiceIndex: options?.piperVoiceIndex,
+        piperLengthScale: options?.piperLengthScale ?? 1,
+        ttsContext: options?.ttsContext,
+      }),
+    });
+
+    if (!res.ok) {
+      this.speaking = false;
+      const err = await readTtsError(res);
+      throw new Error(`TTS failed (${res.status}): ${err.slice(0, 800)}`);
+    }
+
+    const ab = await res.arrayBuffer();
+    return this.audio.decodeAudioData(ab);
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.revealRaf !== null) {
@@ -86,5 +161,18 @@ export class PiperTTS implements TTSEngine {
 
   isSpeaking(): boolean {
     return this.speaking;
+  }
+}
+
+async function readTtsError(response: Response): Promise<string> {
+  const raw = await response.text();
+
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown; detail?: unknown };
+    return [parsed.error, parsed.detail]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(": ");
+  } catch {
+    return raw;
   }
 }

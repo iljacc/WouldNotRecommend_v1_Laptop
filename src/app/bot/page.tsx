@@ -9,9 +9,10 @@ import {
   VisualEffects,
 } from "@/components/VisualEffects";
 import { useBot } from "@/hooks/useBot";
+import { useRuntimeEnvironmentMonitor } from "@/hooks/useRuntimeEnvironmentMonitor";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import {
-  getBotSettings,
-  subscribeBotSettings,
+  createDefaultBotSettings,
   type BotStreetViewSettings,
 } from "@/lib/bot-settings";
 
@@ -21,8 +22,8 @@ const KIOSK_MODE = process.env.NEXT_PUBLIC_KIOSK_MODE === "true";
 const SV_FALLBACK_BG = "/connection-lost-bg.png";
 
 export default function BotPage() {
-  const [streetViewSettings, setStreetViewSettings] =
-    useState<BotStreetViewSettings>(() => getBotSettings().streetView);
+  const [streetViewSettings] =
+    useState<BotStreetViewSettings>(() => createDefaultBotSettings().streetView);
   const {
     containerRef,
     uiState,
@@ -33,6 +34,8 @@ export default function BotPage() {
     error,
     startBot,
   } = useBot();
+  useRuntimeEnvironmentMonitor(isStarted);
+  useScreenWakeLock(isStarted);
 
   useEffect(() => {
     if (!KIOSK_MODE || isStarted) return;
@@ -43,12 +46,6 @@ export default function BotPage() {
 
     return () => window.clearTimeout(timer);
   }, [isStarted, startBot]);
-
-  useEffect(() => {
-    return subscribeBotSettings(() => {
-      setStreetViewSettings(getBotSettings().streetView);
-    });
-  }, []);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden font-mono">

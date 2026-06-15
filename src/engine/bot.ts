@@ -1,11 +1,7 @@
 "use client";
 
-import { postActivity } from "@/lib/bot-activity";
-import {
-  getBotSettings,
-  reloadBotSettingsFromStorage,
-  subscribeBotSettings,
-} from "@/lib/bot-settings";
+import { postActivity, setActivitySessionId } from "@/lib/bot-activity";
+import { getBotSettings, isLatLngInWanderRegion } from "@/lib/bot-settings";
 import {
   DEFAULT_START,
   MAPS_CDN,
@@ -13,7 +9,12 @@ import {
   SUBTITLE_TIMING,
   TIMING,
 } from "@/lib/config";
-import { startMapsImageryCdnErrorMonitor } from "@/lib/maps-cdn-stress";
+import {
+  startMapsImageryCdnDiagnosticsMonitor,
+  type MapsImageryBurst,
+  type MapsImageryResourceError,
+  type MapsImageryStatusCounts,
+} from "@/lib/maps-cdn-stress";
 import {
   BotState,
   stateToMode,
@@ -35,6 +36,7 @@ import { StreetViewController } from "./street-view-controller";
 import { CityTourController } from "./city-tour";
 import { TeleportManager } from "./teleport-manager";
 import { PiperTTS } from "./tts-engine";
+import { PIPER_VOICE_INDEX } from "@/lib/piper-config";
 export type BotStateCallback = (context: BotContext) => void;
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -60,6 +62,7 @@ export class Bot {
   private stuckCheckInterval: Interval | null = null;
   private coordinateInterval: Interval | null = null;
   private statsInterval: Interval | null = null;
+  private blackFrameInterval: Interval | null = null;
   private lastStatsCoords: LatLng = DEFAULT_START;
   private distanceKm = 0;
   private locationsScanned = 0;
@@ -72,19 +75,28 @@ export class Bot {
   private subtitleHideTimer: Timer | null = null;
   /** Avoid duplicate STATE lines; WANDER is not logged here (use SEARCHING per step). */
   private lastActivityBroadcastState: BotState | null = null;
-  private unsubscribeSettings: (() => void) | null = null;
-  /** From admin / `wanderStepInterval`; updated on settings reload. */
+  /** Configured base `wanderStepInterval`; Maps CDN stress can temporarily raise it. */
   private baseWanderStepMs: number = TIMING.WANDER_STEP_INTERVAL;
   /** True while Maps tile CDN burst backoff is active. */
   private mapsCdnStressBackoff = false;
   /** Browser timeout handle (`use client` — DOM `number`, not Node `Timeout`). */
   private mapsStressRecoveryTimer: number | null = null;
   private stopMapsCdnMonitor: (() => void) | null = null;
+  private lastMapsErrorActivityAt = 0;
+  private lastMapsErrorCounts: MapsImageryStatusCounts = {};
+  private lastMapsErrorWindowMs: number = MAPS_CDN.ERROR_BURST_WINDOW_MS;
+  private lastMapsDominantStatus = 0;
+  private blackFrameSamplingUnavailable = false;
+  private lastBlackFrameActivityAt = 0;
   /** Session city from spawn geocode only; kept across teleports within the run. */
   private sessionCityResolved = false;
   /** Set immediately before `TELEPORT_TRIGGERED` when advancing the curated city tour. */
   private teleportExplicitDestination: LatLng | null = null;
   private teleportScheduledTourAdvance = false;
+  private teleportTriggerCause: "imagery_fault" | "boundary_exit" | null = null;
+  private consecutiveOutOfRegionSteps = 0;
+  private reviewFallbackAnchor: LatLng | null = null;
+  private boundaryTeleportPending = false;
 
   async start(
     container: HTMLElement,
@@ -102,6 +114,10 @@ export class Bot {
       ? this.cityTour.pickRandomSpawnForCurrentStop()
       : this.teleportManager.getRandomSpawnCoords();
     this.context = createInitialContext(spawn);
+    this.consecutiveOutOfRegionSteps = 0;
+    this.reviewFallbackAnchor = null;
+    this.boundaryTeleportPending = false;
+    this.teleportTriggerCause = null;
     if (tourOn) {
       this.sessionCityResolved = true;
       this.cityTour.beginSession();
@@ -121,35 +137,42 @@ export class Bot {
       };
     }
 
-    await this.streetView.init(container, spawn, undefined, {
+    const resolvedSpawn = await this.streetView.init(container, spawn, undefined, {
       onSuccessfulStep: () => this.onWanderStep(),
       onImageryFault: () => this.onImageryFault(),
     });
-    this.teleportManager.resetStuckDetection(spawn);
+    this.context = {
+      ...this.context,
+      currentCoords: resolvedSpawn,
+    };
+    this.lastStatsCoords = resolvedSpawn;
+    this.teleportManager.resetStuckDetection(resolvedSpawn);
 
     await this.logAction("createSession", { sessionId: this.sessionId });
+    setActivitySessionId(this.sessionId);
 
     postActivity("SESSION", [
       `sessionId=${this.sessionId}`,
-      `spawn lat=${spawn.lat.toFixed(6)} lng=${spawn.lng.toFixed(6)}`,
-    ]);
+      `spawn lat=${resolvedSpawn.lat.toFixed(6)} lng=${resolvedSpawn.lng.toFixed(6)}`,
+    ], {
+      lat: resolvedSpawn.lat,
+      lng: resolvedSpawn.lng,
+      state: this.context.state,
+      metadata: { event: "session_start" },
+    });
 
     this.running = true;
-    reloadBotSettingsFromStorage();
-    this.syncBaseWanderStepFromSettings();
+    this.baseWanderStepMs = getBotSettings().timing.wanderStepInterval;
     this.audio.startAmbient();
     this.streetView.startWalking(this.getEffectiveWanderStepInterval());
-    this.stopMapsCdnMonitor = startMapsImageryCdnErrorMonitor(() =>
-      this.onMapsCdnStressBurst(),
-    );
+    this.stopMapsCdnMonitor = startMapsImageryCdnDiagnosticsMonitor({
+      onResourceError: (event) => this.onMapsCdnResourceError(event),
+      onBurst: (burst) => this.onMapsCdnStressBurst(burst),
+    });
     this.startPeriodicChecks();
-    this.unsubscribeSettings = subscribeBotSettings(
-      () => this.applySettingsHotReload(),
-      () => this.applySoftReset(),
-    );
     /** City label from reverse-geocode at **spawn** unless city tour supplies labels. */
     if (!tourOn) {
-      void this.resolveSessionCityWithRetries(spawn);
+      void this.resolveSessionCityWithRetries(resolvedSpawn);
     }
     this.notifyStateChange();
   }
@@ -160,8 +183,6 @@ export class Bot {
 
   destroy(): void {
     this.running = false;
-    this.unsubscribeSettings?.();
-    this.unsubscribeSettings = null;
     this.stopMapsCdnMonitor?.();
     this.stopMapsCdnMonitor = null;
     this.clearMapsStressRecoveryTimer();
@@ -184,6 +205,7 @@ export class Bot {
     if (this.stuckCheckInterval) clearInterval(this.stuckCheckInterval);
     if (this.coordinateInterval) clearInterval(this.coordinateInterval);
     if (this.statsInterval) clearInterval(this.statsInterval);
+    if (this.blackFrameInterval) clearInterval(this.blackFrameInterval);
   }
 
   private dispatch(event: BotEvent): void {
@@ -268,6 +290,7 @@ export class Bot {
         return "stuck_threshold";
       case "TELEPORT_TRIGGERED":
         if (this.teleportScheduledTourAdvance) return "scheduled_city_hop";
+        if (this.teleportTriggerCause) return this.teleportTriggerCause;
         if (prevState === BotState.WANDER) return "imagery_fault";
         if (prevState === BotState.DETECT) return "interrupt_during_detect";
         if (prevState === BotState.DELIVER) return "interrupt_during_deliver";
@@ -299,10 +322,7 @@ export class Bot {
         break;
 
       case "PAN_TO_BUSINESS":
-        void this.streetView.panToHeading(
-          effect.bearingDeg,
-          getBotSettings().timing.alignPanMs,
-        );
+        void this.handleBusinessPan(effect.bearingDeg);
         break;
 
       case "PAN_TO_WANDER_HEADING": {
@@ -317,7 +337,7 @@ export class Bot {
       }
 
       case "START_TTS":
-        void this.handleTts(effect.text);
+        void this.handleTts(effect.text, effect.piperVoiceIndex);
         break;
 
       case "PLAY_BLEEP":
@@ -347,6 +367,7 @@ export class Bot {
       case "START_TELEPORT_FADE": {
         const fromCoords = { ...this.context.currentCoords };
         const cause = this.teleportCause(event, prevState);
+        this.teleportTriggerCause = null;
         postActivity("TELEPORT", [
           `fade-out | cause=${cause} | from_lat=${fromCoords.lat.toFixed(6)} from_lng=${fromCoords.lng.toFixed(6)}`,
         ]);
@@ -414,38 +435,10 @@ export class Bot {
     this.statsInterval = setInterval(() => {
       void this.updateStats();
     }, getBotSettings().timing.statsUpdateInterval);
-  }
 
-  private restartStuckAndStatsIntervals(): void {
-    if (this.stuckCheckInterval) clearInterval(this.stuckCheckInterval);
-    if (this.statsInterval) clearInterval(this.statsInterval);
-    const timing = getBotSettings().timing;
-    this.stuckCheckInterval = setInterval(() => {
-      if (!this.running || this.context.state !== BotState.WANDER) return;
-      const coords = this.streetView.getCoords();
-      if (this.teleportManager.shouldTeleport(coords)) {
-        this.dispatch({ type: "STUCK_DETECTED" });
-        return;
-      }
-      this.teleportManager.updateStuckCheck(coords);
-    }, timing.stuckCheckInterval);
-    this.statsInterval = setInterval(() => {
-      void this.updateStats();
-    }, timing.statsUpdateInterval);
-  }
-
-  private applySettingsHotReload(): void {
-    if (!this.running) return;
-    this.syncBaseWanderStepFromSettings();
-    this.restartStuckAndStatsIntervals();
-    if (this.context.state === BotState.WANDER) {
-      this.streetView.stopWalking();
-      this.streetView.startWalking(this.getEffectiveWanderStepInterval());
-    }
-  }
-
-  private syncBaseWanderStepFromSettings(): void {
-    this.baseWanderStepMs = getBotSettings().timing.wanderStepInterval;
+    this.blackFrameInterval = setInterval(() => {
+      this.checkStreetViewBlackFrame();
+    }, MAPS_CDN.BLACK_FRAME_SAMPLE_INTERVAL_MS);
   }
 
   private getEffectiveWanderStepInterval(): number {
@@ -461,30 +454,135 @@ export class Bot {
     }
   }
 
-  private onMapsCdnStressBurst(): void {
+  private formatMapsStatusCounts(counts: MapsImageryStatusCounts): string {
+    const entries = Object.entries(counts)
+      .map(([status, count]) => `${status}=${count}`)
+      .join(" ");
+    return entries || "none";
+  }
+
+  private mapsDiagnosticsContext(): string {
+    return `state=${this.context.state} backoff=${this.mapsCdnStressBackoff ? "on" : "off"} stepMs=${this.getEffectiveWanderStepInterval()}`;
+  }
+
+  private onMapsCdnResourceError(event: MapsImageryResourceError): void {
+    this.lastMapsErrorCounts = event.countsByStatus;
+    this.lastMapsErrorWindowMs = event.windowMs;
+    this.lastMapsDominantStatus = event.status;
+
+    const now = Date.now();
+    if (
+      now - this.lastMapsErrorActivityAt <
+      MAPS_CDN.ERROR_ACTIVITY_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastMapsErrorActivityAt = now;
+    postActivity("MAPS", [
+      `imagery status=${event.status} host=${event.host} count=${event.countInWindow}/${event.windowMs}ms counts=${this.formatMapsStatusCounts(event.countsByStatus)} ${this.mapsDiagnosticsContext()}`,
+    ], {
+      lat: this.context.currentCoords.lat,
+      lng: this.context.currentCoords.lng,
+      state: this.context.state,
+      statusCode: event.status,
+      metadata: {
+        host: event.host,
+        countInWindow: event.countInWindow,
+        windowMs: event.windowMs,
+        countsByStatus: event.countsByStatus,
+        url: event.url,
+      },
+    });
+  }
+
+  private onMapsCdnStressBurst(burst?: MapsImageryBurst): void {
     if (!this.running) return;
+    if (burst) {
+      this.lastMapsErrorCounts = burst.countsByStatus;
+      this.lastMapsErrorWindowMs = burst.windowMs;
+      this.lastMapsDominantStatus = burst.dominantStatus;
+    }
     this.clearMapsStressRecoveryTimer();
     this.mapsCdnStressBackoff = true;
     const ms = this.getEffectiveWanderStepInterval();
     if (this.context.state === BotState.WANDER) {
       this.streetView.setWalkingInterval(ms);
     }
+    const counts = burst
+      ? this.formatMapsStatusCounts(burst.countsByStatus)
+      : this.formatMapsStatusCounts(this.lastMapsErrorCounts);
     postActivity("MAPS", [
-      `tile/CDN burst — wander ${ms}ms (stress floor ${MAPS_CDN.STRESS_MIN_WANDER_INTERVAL_MS}ms)`,
-    ]);
+      `tile/CDN burst counts=${counts} window=${burst?.windowMs ?? MAPS_CDN.ERROR_BURST_WINDOW_MS}ms ${this.mapsDiagnosticsContext()} -> wander ${ms}ms`,
+    ], {
+      lat: this.context.currentCoords.lat,
+      lng: this.context.currentCoords.lng,
+      state: this.context.state,
+      statusCode: burst?.dominantStatus,
+      metadata: {
+        event: "maps_cdn_burst",
+        countsByStatus: burst?.countsByStatus ?? this.lastMapsErrorCounts,
+        windowMs: burst?.windowMs ?? MAPS_CDN.ERROR_BURST_WINDOW_MS,
+        countInWindow: burst?.countInWindow,
+      },
+    });
     this.mapsStressRecoveryTimer = window.setTimeout(() => {
       this.mapsStressRecoveryTimer = null;
       this.mapsCdnStressBackoff = false;
       if (this.running && this.context.state === BotState.WANDER) {
         this.streetView.setWalkingInterval(this.getEffectiveWanderStepInterval());
       }
+      postActivity("MAPS", [
+        `recovered quietMs=${MAPS_CDN.STRESS_RECOVERY_QUIET_MS} ${this.mapsDiagnosticsContext()}`,
+      ], {
+        lat: this.context.currentCoords.lat,
+        lng: this.context.currentCoords.lng,
+        state: this.context.state,
+        metadata: { event: "maps_cdn_recovered" },
+      });
     }, MAPS_CDN.STRESS_RECOVERY_QUIET_MS);
   }
 
-  private applySoftReset(): void {
-    this.context.readReviewAtByHash.clear();
-    this.reviewManager.clearSessionCaches();
-    postActivity("SESSION", ["soft-reset — cleared review hash cache"]);
+  private checkStreetViewBlackFrame(): void {
+    if (!this.running || this.blackFrameSamplingUnavailable) return;
+    if (this.context.teleportPhase !== "none") return;
+
+    const sample = this.streetView.sampleCanvasBrightness();
+    if (!sample.available) {
+      this.blackFrameSamplingUnavailable = true;
+      postActivity("MAPS", [`canvas sampling unavailable reason=${sample.reason}`]);
+      return;
+    }
+
+    if (sample.brightness > MAPS_CDN.BLACK_FRAME_BRIGHTNESS_THRESHOLD) return;
+
+    const now = Date.now();
+    if (
+      now - this.lastBlackFrameActivityAt <
+      MAPS_CDN.BLACK_FRAME_ACTIVITY_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastBlackFrameActivityAt = now;
+    const coords = this.streetView.getCoords();
+    postActivity("MAPS", [
+      `black-frame brightness=${sample.brightness.toFixed(1)} canvas=${sample.width}x${sample.height} lat=${coords.lat.toFixed(6)} lng=${coords.lng.toFixed(6)} counts=${this.formatMapsStatusCounts(this.lastMapsErrorCounts)} window=${this.lastMapsErrorWindowMs}ms dominant=${this.lastMapsDominantStatus || "none"} ${this.mapsDiagnosticsContext()}`,
+    ], {
+      lat: coords.lat,
+      lng: coords.lng,
+      state: this.context.state,
+      statusCode: this.lastMapsDominantStatus || undefined,
+      metadata: {
+        event: "black_frame",
+        brightness: sample.brightness,
+        canvasWidth: sample.width,
+        canvasHeight: sample.height,
+        countsByStatus: this.lastMapsErrorCounts,
+        windowMs: this.lastMapsErrorWindowMs,
+        dominantStatus: this.lastMapsDominantStatus,
+      },
+    });
   }
 
   private onWanderStep(): void {
@@ -497,11 +595,76 @@ export class Bot {
     postActivity("SEARCHING", [
       `step ${this.activityLocationFragmentFrom(coords)}`,
     ]);
+    this.handleReviewRegionBoundary(coords);
   }
 
   private onImageryFault(): void {
     if (!this.running || this.teleporting) return;
+    this.teleportTriggerCause = "imagery_fault";
     this.dispatch({ type: "TELEPORT_TRIGGERED" });
+  }
+
+  private handleReviewRegionBoundary(coords: LatLng): void {
+    const settings = getBotSettings();
+    if (isLatLngInWanderRegion(coords, settings.wanderRegion)) {
+      if (this.consecutiveOutOfRegionSteps > 0) {
+        postActivity("BOUNDARY", [
+          `back inside review region after ${this.consecutiveOutOfRegionSteps} outside step(s)`,
+        ]);
+      }
+      this.consecutiveOutOfRegionSteps = 0;
+      this.reviewFallbackAnchor = null;
+      this.boundaryTeleportPending = false;
+      return;
+    }
+
+    this.consecutiveOutOfRegionSteps += 1;
+    if (!this.reviewFallbackAnchor) {
+      this.reviewFallbackAnchor = this.teleportManager.getRandomSpawnCoords();
+      postActivity("BOUNDARY", [
+        `outside review region step=${this.consecutiveOutOfRegionSteps} | fallback_lat=${this.reviewFallbackAnchor.lat.toFixed(6)} fallback_lng=${this.reviewFallbackAnchor.lng.toFixed(6)}`,
+      ]);
+    }
+
+    if (
+      this.consecutiveOutOfRegionSteps >=
+        PLACES.OUT_OF_REGION_STEPS_BEFORE_TELEPORT &&
+      !this.boundaryTeleportPending &&
+      !this.teleporting
+    ) {
+      this.boundaryTeleportPending = true;
+      this.teleportTriggerCause = "boundary_exit";
+      postActivity("BOUNDARY", [
+        `outside review region for ${this.consecutiveOutOfRegionSteps} step(s) — returning to corpus`,
+      ]);
+      this.dispatch({ type: "TELEPORT_TRIGGERED" });
+    }
+  }
+
+  private async handleBusinessPan(bearingDeg: number): Promise<void> {
+    const timing = getBotSettings().timing;
+    const completed = await this.withTimeout(
+      (async () => {
+        await this.streetView.panToHeading(bearingDeg, timing.alignPanMs);
+        if (timing.alignHoldMs > 0) {
+          await this.sleep(timing.alignHoldMs);
+        }
+      })(),
+      timing.detectMaxWaitMs,
+    );
+    if (!completed) {
+      postActivity("WARN", [
+        `detect_timeout maxMs=${timing.detectMaxWaitMs} | ${this.activityLocationFragment()}`,
+      ], {
+        lat: this.context.currentCoords.lat,
+        lng: this.context.currentCoords.lng,
+        state: this.context.state,
+        metadata: { event: "detect_timeout", maxMs: timing.detectMaxWaitMs },
+      });
+    }
+    if (this.running && this.context.state === BotState.DETECT) {
+      this.dispatch({ type: "DETECT_COMPLETE" });
+    }
   }
 
   private async checkForBusiness(): Promise<void> {
@@ -511,23 +674,51 @@ export class Bot {
 
     const coords = this.streetView.getCoords();
     this.context = { ...this.context, currentCoords: coords };
+    const inReviewRegion = isLatLngInWanderRegion(
+      coords,
+      getBotSettings().wanderRegion,
+    );
+    const useFallbackReview =
+      !inReviewRegion &&
+      this.consecutiveOutOfRegionSteps >=
+        PLACES.OUT_OF_REGION_STEPS_BEFORE_FALLBACK_REVIEW;
+    const queryCoords = useFallbackReview
+      ? (this.reviewFallbackAnchor ?? this.teleportManager.getRandomSpawnCoords())
+      : coords;
+    if (useFallbackReview && !this.reviewFallbackAnchor) {
+      this.reviewFallbackAnchor = queryCoords;
+    }
 
-    if (this.reviewManager.shouldQuery(coords)) {
-      await this.reviewManager.fetchNearbyBusinessesFirstPage(coords);
+    if (this.reviewManager.shouldQuery(queryCoords)) {
+      if (useFallbackReview) {
+        postActivity("BOUNDARY", [
+          `fallback review lookup | bot_lat=${coords.lat.toFixed(6)} bot_lng=${coords.lng.toFixed(6)} | query_lat=${queryCoords.lat.toFixed(6)} query_lng=${queryCoords.lng.toFixed(6)}`,
+        ]);
+      }
+      await this.reviewManager.fetchNearbyBusinesses(queryCoords, {
+        bearingFromCoords: coords,
+      });
       this.locationsScanned += this.reviewManager.getCachedPlaceCount();
     }
 
     const maxDetails = PLACES.MAX_PLACE_DETAILS_ATTEMPTS_PER_CHECK;
     let detailsUsed = 0;
-    let nearbyPageRounds = 0;
 
     while (detailsUsed < maxDetails) {
-      const business = this.reviewManager.findNearestBusiness(coords);
+      const business = this.reviewManager.findNearestBusiness(queryCoords, {
+        allowOutOfRegionFallback: useFallbackReview,
+        bearingFromCoords: coords,
+      });
       if (business) {
         detailsUsed += 1;
         const { review, businessTypes } =
           await this.reviewManager.fetchAndSelectReview(business.placeId);
         if (review) {
+          const piperVoiceIndex = PIPER_VOICE_INDEX;
+          const reviewToRead = {
+            ...review,
+            piperVoiceIndex,
+          };
           const targetBusiness = {
             ...business,
             types: businessTypes.length > 0 ? businessTypes : business.types,
@@ -537,12 +728,22 @@ export class Bot {
           this.context = {
             ...this.context,
             targetBusiness,
-            reviewToRead: review,
+            reviewToRead,
           };
+          this.tts.prepare(reviewToRead.text, {
+            piperVoiceIndex,
+            piperLengthScale: 1,
+            ttsContext: {
+              placeId: targetBusiness.placeId,
+              reviewId: reviewToRead.reviewId,
+              businessName: targetBusiness.name,
+              source: "bot-prepare",
+            },
+          });
 
           postActivity("REVIEW", [
-            `placeId=${targetBusiness.placeId} | business=${targetBusiness.name} | author=${review.authorName} | relativeTime=${review.relativeTimeDescription} | rating=${review.rating}`,
-            review.text,
+            `placeId=${targetBusiness.placeId} | reviewHash=${reviewToRead.hash} | business=${targetBusiness.name} | author=${reviewToRead.authorName} | relativeTime=${reviewToRead.relativeTimeDescription} | rating=${reviewToRead.rating} | piperVoice=${piperVoiceIndex}`,
+            reviewToRead.text,
           ]);
 
           this.dispatch({ type: "BUSINESS_DETECTED", business: targetBusiness });
@@ -550,22 +751,11 @@ export class Bot {
         }
         continue;
       }
-
-      if (
-        nearbyPageRounds < PLACES.NEARBY_EXTRA_PAGE_ROUNDS_PER_CHECK &&
-        this.reviewManager.canLoadMoreNearbyPages()
-      ) {
-        const added = await this.reviewManager.fetchNearbyNextPage(coords);
-        nearbyPageRounds += 1;
-        this.locationsScanned += added;
-        if (added === 0) break;
-        continue;
-      }
       break;
     }
   }
 
-  private async handleTts(text: string): Promise<void> {
+  private async handleTts(text: string, piperVoiceIndex?: number): Promise<void> {
     if (this.subtitleHideTimer) {
       clearTimeout(this.subtitleHideTimer);
       this.subtitleHideTimer = null;
@@ -574,6 +764,14 @@ export class Bot {
     this.onSubtitleChange?.({ fullText: text, revealed: 0 });
     try {
       await this.tts.speak(text, {
+        piperVoiceIndex,
+        piperLengthScale: 1,
+        ttsContext: {
+          placeId: this.context.targetBusiness?.placeId,
+          reviewId: this.context.reviewToRead?.reviewId,
+          businessName: this.context.targetBusiness?.name,
+          source: "bot-speak",
+        },
         onReveal: (n) => {
           this.onSubtitleChange?.({ fullText: text, revealed: n });
         },
@@ -626,19 +824,31 @@ export class Bot {
       await this.sleep(timing.teleportHoldDim);
     }
 
-    const destination =
+    const requestedDestination =
       explicitDest ??
       this.teleportManager.selectDestination(
         this.context.currentCoords,
-        this.cityTour.isActive()
+        this.cityTour.isActive() && cause !== "boundary_exit"
           ? { cityAnchor: this.cityTour.getCurrentStop() }
           : undefined,
       );
+    let destination = requestedDestination;
     postActivity("TELEPORT", [
       `jump | cause=${cause} | from_lat=${fromCoords.lat.toFixed(6)} from_lng=${fromCoords.lng.toFixed(6)} → to_lat=${destination.lat.toFixed(6)} to_lng=${destination.lng.toFixed(6)}`,
     ]);
-    this.streetView.teleportTo(destination);
-    this.teleports += 1;
+    const resolvedDestination = await this.resolveTeleportDestination(
+      requestedDestination,
+      cause,
+    );
+    if (!resolvedDestination) {
+      postActivity("TELEPORT", [
+        "no walkable outdoor panorama found for requested destination; staying at current pano",
+      ]);
+    }
+    destination = resolvedDestination ?? this.streetView.getCoords();
+    if (resolvedDestination) {
+      this.teleports += 1;
+    }
     this.lastStatsCoords = destination;
     this.context = {
       ...this.context,
@@ -646,10 +856,15 @@ export class Bot {
       targetBusiness: null,
       reviewToRead: null,
     };
+    if (cause === "boundary_exit") {
+      this.consecutiveOutOfRegionSteps = 0;
+      this.reviewFallbackAnchor = null;
+      this.boundaryTeleportPending = false;
+    }
     this.teleportManager.resetStuckDetection(destination);
     void this.updateStats();
 
-    if (tourAdvance && this.cityTour.isActive()) {
+    if (resolvedDestination && tourAdvance && this.cityTour.isActive()) {
       this.cityTour.completeScheduledHop();
       this.context = {
         ...this.context,
@@ -674,6 +889,28 @@ export class Bot {
     postActivity("TELEPORT", ["complete — resuming wander"]);
     this.teleporting = false;
     this.dispatch({ type: "TELEPORT_COMPLETE" });
+  }
+
+  private async resolveTeleportDestination(
+    requestedDestination: LatLng,
+    cause: string,
+  ): Promise<LatLng | null> {
+    let attemptDestination = requestedDestination;
+    const hint =
+      this.cityTour.isActive() && cause !== "boundary_exit"
+        ? { cityAnchor: this.cityTour.getCurrentStop() }
+        : undefined;
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const resolved = await this.streetView.teleportTo(attemptDestination);
+      if (resolved) return resolved;
+      attemptDestination = this.teleportManager.selectDestination(
+        this.context.currentCoords,
+        hint,
+      );
+    }
+
+    return null;
   }
 
   private async takeScreenshot(): Promise<void> {
@@ -887,6 +1124,28 @@ export class Bot {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
+    });
+  }
+
+  private withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (completed: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(completed);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      work
+        .then(() => {
+          clearTimeout(timer);
+          finish(true);
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          console.warn("Timed operation failed:", error);
+          finish(false);
+        });
     });
   }
 }

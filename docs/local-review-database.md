@@ -1,16 +1,10 @@
 # Local review database
 
-The installation can read reviews from `data/db/would-not-recommend.db` instead of making live Google Places review calls.
+The installation reads reviews from `data/db/would-not-recommend.db` instead of making live Google Places review calls.
 
-Set:
+The bot still renders Google Street View in the browser, but `/api/places` always serves nearby businesses and reviews from SQLite.
 
-```env
-REVIEW_SOURCE=local
-```
-
-The bot still renders Google Street View in the browser, but `/api/places` serves nearby businesses and reviews from SQLite.
-
-When local mode is active, nearby lookup accepts the bot's configured `targetRating` and only returns places that have at least one review at that rating. With the default settings, this means the bot is handed places with one-star reviews instead of wasting detection attempts on nearby places that only have higher-rated reviews.
+Nearby lookup accepts the bot's configured `targetRating` and only returns places that have at least one review at that rating. With the default settings, this means the bot is handed places with one-star reviews instead of wasting detection attempts on nearby places that only have higher-rated reviews.
 
 ## Supported tables
 
@@ -80,7 +74,7 @@ Local review rows keep lightweight read history:
 | `last_read_at` | ISO timestamp for the last selected/read time. |
 | `last_selected_at` | Same selection timestamp, kept for compatibility with the older offline schema. |
 
-When `/api/places` is in local mode, it prefers reviews that have never been read or whose
+When `/api/places` selects reviews, it prefers rows that have never been read or whose
 `last_read_at` is outside the configured cooldown. If every matching review for a place is still
 inside cooldown, it can fall back to the oldest read row rather than going silent. This still allows
 the bot to read another one-star review from the same place.
@@ -110,7 +104,7 @@ reviews are deduplicated by `(place_id, review_text)`.
 Open `/review-map` after importing local review rows. The page is read-only and draws:
 
 - orange circles for local one-star review locations, scaled by review count
-- the current bot wander area from default or browser-local admin settings
+- the current bot wander area from `src/lib/config.ts`
 - the configured search-radius circle
 - custom spawn points, or the default `data/teleport-destinations.json` starts when no custom spawns are saved
 - a rough spawn-to-spawn line so coverage can be visually compared with review clusters
@@ -182,11 +176,11 @@ Once a valid populated DB is present:
 npm run dev
 ```
 
-Then open `/admin`. Health should show:
+Then open `/review-map` or `/bot` and confirm the local API is populated. Health should show:
 
 ```text
 Review source: local
 Local corpus: <places> places / <reviews> reviews
 ```
 
-If the counts are `0`, either the DB is empty, the wrong tables are present, or `REVIEW_SOURCE=local` is not set.
+If the counts are `0`, either the DB is empty or the wrong tables are present.

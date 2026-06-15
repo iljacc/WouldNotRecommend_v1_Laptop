@@ -48,7 +48,7 @@ export function getStreetViewEffectStyle(
   const yPx = Math.min(28, pitchSway * 10);
   const rotateDeg = Math.min(1.05, sway * 0.075);
   const durationSec = Math.min(34, Math.max(12, 10 / drift));
-  const scale = 1 + Math.max(xPx / 760, yPx / 430, 0.035);
+  const scale = 1 + Math.max(xPx / 760, yPx / 430, 0.012);
 
   const style: CSSProperties & Record<`--${string}`, string | number> = {
     filter,
