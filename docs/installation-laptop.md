@@ -18,7 +18,11 @@ Edit `.env.local` and set:
 NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY=your_maps_javascript_api_key_here
 TTS_ENGINE=piper
 NEXT_PUBLIC_KIOSK_MODE=true
+NEXT_PUBLIC_CITY_TOUR=false
 ```
+
+Without the real Maps JavaScript key, Street View will not load panoramas. Without
+`npm run setup:piper`, local review speech will not be synthesized.
 
 The committed SQLite review corpus lives at:
 

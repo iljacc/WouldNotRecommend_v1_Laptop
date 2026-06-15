@@ -46,6 +46,7 @@ For a second gallery laptop, use `docs/installation-laptop.md`.
 | --- | --- |
 | `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` | Browser Street View and map rendering |
 | `NEXT_PUBLIC_KIOSK_MODE` | Auto-start `/bot` when true |
+| `NEXT_PUBLIC_CITY_TOUR` | Optional curated multi-city rotation; `true` enables it, default/off is fixed The Hague |
 | `TTS_ENGINE` | `piper` or `kokoro` |
 | `NEXT_PUBLIC_BOT_CCTV_OVERLAY` | Optional `/bot` overlay |
 | `NEXT_PUBLIC_ADMIN_PASSWORD` | Optional local admin gate |
@@ -108,6 +109,7 @@ No Places API key is needed or used.
 - `ReviewManager` queries local nearby candidates after enough time and movement have passed.
 - Local nearby lookup is nearest-neighbor, capped by `PLACES.LOCAL_CORPUS_NEAREST_PLACE_LIMIT`.
 - Boundary recovery prevents the bot from wandering silently outside the review corpus. After `PLACES.OUT_OF_REGION_STEPS_BEFORE_FALLBACK_REVIEW` outside-region Street View steps, `/bot` may query reviews from an in-region fallback anchor while preserving the real bot bearing for camera motion. After `PLACES.OUT_OF_REGION_STEPS_BEFORE_TELEPORT` outside-region steps, it triggers a normal `boundary_exit` teleport back into the configured review region.
+- City tour is opt-in. Leave `NEXT_PUBLIC_CITY_TOUR=false` or unset for the fixed The Hague installation behavior. Set it to `true` only when deliberately testing the curated multi-city rotation in `data/city-tour.json`.
 - Exact review repeat history is tracked in memory and persisted in corpus rows when supported. In-memory session history is timestamped: the current `/bot` tab avoids the same review hash for `sessionReviewRepeatCooldownMinutes` (default 30), then may reuse it if needed for cadence.
 - `/terminal` is same-browser, same-origin only; it is not a persisted multi-device feed.
 - `npm start` uses `scripts/start-with-kiosk.cjs` to launch production

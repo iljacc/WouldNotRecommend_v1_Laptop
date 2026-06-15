@@ -109,6 +109,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 - Required remote key: `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` for browser Street View.
 - Review data: local SQLite only.
+- City tour is opt-in: set `NEXT_PUBLIC_CITY_TOUR=true` only when deliberately testing the curated multi-city rotation. Leave it false or unset for fixed `The Hague` display.
 - Second laptop setup: `docs/installation-laptop.md`.
 - City display: `/api/geocode` validates coordinates and returns the fixed
   installation label `The Hague`.

@@ -164,7 +164,7 @@ export const DEFAULT_START: LatLng = {
 };
 
 /** Bot page-only toggles (build-time `NEXT_PUBLIC_*`). */
-/** Curated city rotation (`data/city-tour.json`). Set `NEXT_PUBLIC_CITY_TOUR=false` to disable. */
+/** Curated city rotation (`data/city-tour.json`). Set `NEXT_PUBLIC_CITY_TOUR=true` to enable. */
 export const CITY_TOUR = {
   SEGMENT_MS: 600_000,
 } as const;

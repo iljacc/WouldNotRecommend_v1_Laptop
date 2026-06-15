@@ -26,8 +26,8 @@ function centroid(spawns: CityTourSpawnPoint[]): LatLng {
 }
 
 function readEnvEnabled(): boolean {
-  if (typeof process === "undefined" || !process.env) return true;
-  return process.env.NEXT_PUBLIC_CITY_TOUR !== "false";
+  if (typeof process === "undefined" || !process.env) return false;
+  return process.env.NEXT_PUBLIC_CITY_TOUR === "true";
 }
 
 /**
