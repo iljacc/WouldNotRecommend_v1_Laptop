@@ -23,6 +23,12 @@ function easeInOutQuint(t: number): number {
   return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
 }
 
+/** Smooth 0…1 easing for gentle scripted camera pans. */
+function easeInOutSine(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return -(Math.cos(Math.PI * x) - 1) / 2;
+}
+
 export type StreetViewStartOptions = {
   pano: string;
   heading: number;
@@ -416,7 +422,7 @@ export class StreetViewController {
     this.cancelHeadingMotion();
     const fromHeading = this.currentHeading;
 
-    return this.runHeadingMotion(fromHeading, targetHeading, durationMs, easeInOutQuint);
+    return this.runHeadingMotion(fromHeading, targetHeading, durationMs, easeInOutSine);
   }
 
   async teleportTo(coords: LatLng): Promise<LatLng | null> {

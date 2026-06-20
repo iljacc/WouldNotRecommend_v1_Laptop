@@ -2,7 +2,7 @@ import type { LatLng } from "./types";
 
 export const TIMING = {
   /** Rotation when facing the business from the road. */
-  ALIGN_PAN_MS: 1_350,
+  ALIGN_PAN_MS: 2_500,
   /** Hold (ms) after align pan finishes, still facing shop, before next state. */
   ALIGN_HOLD_MS: 450,
   /** Hard cap for DETECT before review delivery starts, even if browser rendering pauses. */

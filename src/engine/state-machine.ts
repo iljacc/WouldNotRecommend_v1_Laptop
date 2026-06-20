@@ -42,6 +42,7 @@ export function transition(
           newState: BotState.DETECT,
           effects: [
             { type: "STOP_WALKING" },
+            { type: "PLAY_BLEEP" },
             { type: "CROSSFADE_TO_B" },
             { type: "PAN_TO_BUSINESS", bearingDeg: event.business.bearing },
           ],

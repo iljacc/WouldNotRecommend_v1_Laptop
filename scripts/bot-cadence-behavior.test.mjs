@@ -40,6 +40,12 @@ assert.equal(
 );
 
 assert.equal(
+  numericConst("ALIGN_PAN_MS"),
+  2500,
+  "business alignment should use a deliberate 2.5 second pan",
+);
+
+assert.equal(
   numericConst("RETURN_STATE_TIMER_MS"),
   1400,
   "return should be brief so reviews chain quickly",
@@ -63,8 +69,8 @@ const businessDetectedBlock = stateMachine.match(
 assert.ok(businessDetectedBlock, "Missing BUSINESS_DETECTED transition");
 assert.match(
   businessDetectedBlock[0],
-  /\{ type: "STOP_WALKING" \}/,
-  "business detection must stop Street View movement before reading",
+  /effects:\s*\[\s*\{ type: "STOP_WALKING" \},\s*\{ type: "PLAY_BLEEP" \},\s*\{ type: "CROSSFADE_TO_B" \},\s*\{ type: "PAN_TO_BUSINESS", bearingDeg: event\.business\.bearing \},\s*\]/,
+  "business detection must stop, bleep, crossfade, then pan",
 );
 
 assert.match(
@@ -77,6 +83,24 @@ assert.match(
   controller,
   /this\.stepForward\(\);[\s\S]*?this\.moveInterval = window\.setInterval/,
   "startWalking should take a step immediately before waiting for the interval",
+);
+
+assert.match(
+  controller,
+  /function easeInOutSine\(t: number\): number \{[\s\S]*?Math\.min\(1, Math\.max\(0, t\)\)[\s\S]*?-\(Math\.cos\(Math\.PI \* x\) - 1\) \/ 2;[\s\S]*?\}/,
+  "controller should define a clamped sine ease for scripted pans",
+);
+
+assert.match(
+  controller,
+  /panToHeading[\s\S]*?runHeadingMotion\(fromHeading, targetHeading, durationMs, easeInOutSine\)/,
+  "panToHeading should use gentler sine easing",
+);
+
+assert.match(
+  controller,
+  /stepForward[\s\S]*?runHeadingMotion\([\s\S]*?easeInOutQuint/,
+  "linked step heading blending should retain quint easing",
 );
 
 assert.doesNotMatch(
