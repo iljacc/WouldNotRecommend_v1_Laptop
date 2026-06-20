@@ -109,3 +109,11 @@ a[href*="google.com/maps"] {
       rotate(calc(var(--wander-float-rotate, 0.3deg) * 0.45));
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .street-view-breathing {
+    animation: none !important;
+    transform: scale(1) !important;
+    transition: none !important;
+  }
+}

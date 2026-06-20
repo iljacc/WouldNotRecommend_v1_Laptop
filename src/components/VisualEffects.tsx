@@ -37,18 +37,19 @@ export function getStreetViewEffectStyle(
         : `filter 120ms linear`
     : `filter ${VISUAL.COLOR_TRANSITION}ms ease`;
 
-  const floatEnabled =
-    botState === BotState.WANDER &&
-    teleportPhase === "none" &&
-    Boolean(streetView?.wanderLookFloatEnabled);
+  const floatEnabled = Boolean(streetView?.wanderLookFloatEnabled);
+  const intensity = botState === BotState.WANDER ? 1 : 0.35;
   const drift = Math.max(0.01, streetView?.wanderLookDrift ?? 0.38);
   const sway = Math.max(0, streetView?.wanderLookSwayDeg ?? 0);
   const pitchSway = Math.max(0, streetView?.wanderLookPitchSwayDeg ?? 0);
-  const xPx = Math.min(54, sway * 3.8);
-  const yPx = Math.min(28, pitchSway * 10);
-  const rotateDeg = Math.min(1.05, sway * 0.075);
+  const xPx = Math.min(54, sway * 3.8) * intensity;
+  const yPx = Math.min(28, pitchSway * 10) * intensity;
+  const rotateDeg = Math.min(1.05, sway * 0.075) * intensity;
   const durationSec = Math.min(34, Math.max(12, 10 / drift));
-  const scale = 1 + Math.max(xPx / 760, yPx / 430, 0.012);
+  // The floor covers default drift on small kiosks; extra padding follows tuned amplitude.
+  const amplitudePadding =
+    xPx * 0.00175 + yPx * 0.00175 + rotateDeg * 0.012;
+  const scale = 1 + Math.max(0.03, amplitudePadding);
 
   const style: CSSProperties & Record<`--${string}`, string | number> = {
     filter,

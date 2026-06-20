@@ -55,7 +55,7 @@ export default function BotPage() {
         style={{ backgroundImage: `url(${SV_FALLBACK_BG})` }}
       />
       <div
-        className="absolute inset-0 z-[1] h-full w-full"
+        className="street-view-breathing absolute inset-0 z-[1] h-full w-full"
         style={getStreetViewEffectStyle(
           uiState.state,
           uiState.teleportPhase,
