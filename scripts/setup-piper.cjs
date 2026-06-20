@@ -66,7 +66,8 @@ function downloadFile(url, destination) {
         ) {
           output.close();
           fs.unlink(destination, () => {
-            downloadFile(response.headers.location, destination).then(resolve, reject);
+            const nextUrl = new URL(response.headers.location, url).toString();
+            downloadFile(nextUrl, destination).then(resolve, reject);
           });
           return;
         }
