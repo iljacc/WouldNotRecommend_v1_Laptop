@@ -21,9 +21,12 @@ Each step looks at outgoing Street View links from the current panorama. Before 
 - **Random link:** pick any connected panorama.
 
 After moving, the camera heading blends smoothly toward the chosen link heading.
-While wandering, the rendered Street View layer also has a very slight CSS-only
-wiggle. This is a local transform on the already-rendered DOM surface; it does
-not call Google camera APIs or request new Street View imagery.
+The rendered Street View layer also has a subtle, continuous CSS-only breathing
+drift in every bot state. It is stronger during Wander and quieter while the bot
+is stopped, aligning, speaking, returning, or teleporting. This is only a CSS
+transform on the already-rendered DOM surface; it does not make per-frame
+`setPov` calls, request additional Street View imagery, or change API or local
+review polling cadence.
 
 ### How far it looks for reviews
 
@@ -75,9 +78,9 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 ### State flow
 
 1. **Wander:** move through Street View and periodically check local review candidates.
-2. **Detect:** stop walking, face the chosen business location, and briefly hold the view.
-3. **Deliver:** read the selected review aloud with subtitles, remain in Processing for one second after speech ends, and optionally log a screenshot while still stopped.
-4. **Return:** pan back toward the wander heading, then continue walking.
+2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and briefly hold the view.
+3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles while the full Processing text and glyph flash yellow/red. With reduced motion enabled, Processing is stable red and the glyph does not pulse. After speech ends, remain stopped for the existing one-second hold once.
+4. **Return:** pan back toward the wander heading, then play the existing exit bloop and resume walking.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
 ## Technical Reference
@@ -99,6 +102,8 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | --- | ---: | --- |
 | `queryDistanceThreshold` | 75 m | Minimum movement before another local candidate query can run |
 | `queryMinInterval` | 9,000 ms | Minimum time between local candidate queries |
+| `ALIGN_PAN_MS` | 2,500 ms | Gently eased camera turn toward the selected business |
+| `ALIGN_HOLD_MS` | 450 ms | Short hold facing the business before speech begins |
 | `POST_TTS_HOLD_MS` | 1,000 ms | Processing hold after speech ends before the return pan begins |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |
 | `detectionRadius` | 700 m | Kept for settings continuity; local candidates bypass the hard cutoff |
