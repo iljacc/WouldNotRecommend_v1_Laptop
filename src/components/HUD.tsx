@@ -77,7 +77,13 @@ export function HUD({
 
       <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8">
         <HudChip>
-          <div className="flex items-center gap-2.5">
+          <div
+            className={`flex items-center gap-2.5 ${
+              botState === BotState.DELIVER
+                ? "processing-complaint-flash"
+                : ""
+            }`}
+          >
             <ModePulseGlyph
               mode={mode}
               state={botState}
@@ -85,6 +91,7 @@ export function HUD({
             />
             <ModeIndicator
               mode={mode}
+              state={botState}
               showCityTourTeleport={scheduledCityTeleportUi}
             />
           </div>

@@ -14,6 +14,16 @@ const controller = readFileSync(
   join(root, "src/engine/street-view-controller.ts"),
   "utf8",
 );
+const hud = readFileSync(join(root, "src/components/HUD.tsx"), "utf8");
+const modeIndicator = readFileSync(
+  join(root, "src/components/ModeIndicator.tsx"),
+  "utf8",
+);
+const modePulseGlyph = readFileSync(
+  join(root, "src/components/ModePulseGlyph.tsx"),
+  "utf8",
+);
+const globalCss = readFileSync(join(root, "src/app/globals.css"), "utf8");
 
 function numericConst(name) {
   const match = config.match(new RegExp(`${name}:\\s*([\\d_]+)`));
@@ -119,4 +129,34 @@ assert.match(
   reviewManager,
   /business\.source === "local"[\s\S]*?business\.distance <= places\.detectionRadius/,
   "local corpus candidates should bypass detection radius while Google candidates remain radius-limited",
+);
+
+assert.match(
+  hud,
+  /className=\{`flex items-center gap-2\.5 \$\{[\s\S]*?botState === BotState\.DELIVER[\s\S]*?processing-complaint-flash[\s\S]*?\}`\}[\s\S]*?<ModePulseGlyph[\s\S]*?<ModeIndicator[\s\S]*?state=\{botState\}/,
+  "HUD should flash the group wrapping both mode elements only during DELIVER and pass the actual state to ModeIndicator",
+);
+
+assert.match(
+  modeIndicator,
+  /state:\s*BotState[\s\S]*?m === "Processing" && mode === m && state === BotState\.DELIVER[\s\S]*?"text-current"[\s\S]*?"text-yellow-400"/,
+  "active DELIVER Processing text should inherit the flashing group color while ordinary Processing stays yellow",
+);
+
+assert.match(
+  modePulseGlyph,
+  /state === BotState\.DELIVER\s*\?\s*"text-current"[\s\S]*?cityTourTeleportBlink\s*\?\s*"text-violet-400"\s*:\s*"text-white"/,
+  "the DELIVER glyph should inherit group color while other glyph states retain their colors",
+);
+
+assert.match(
+  globalCss,
+  /@keyframes processing-complaint-flash[\s\S]*?0%[\s\S]*?#facc15[\s\S]*?50%[\s\S]*?#ef4444[\s\S]*?\.processing-complaint-flash\s*\{[\s\S]*?animation:\s*processing-complaint-flash 850ms ease-in-out infinite/,
+  "complaint flash should alternate yellow and red on an 850ms eased loop",
+);
+
+assert.match(
+  globalCss,
+  /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-complaint-flash\s*\{[\s\S]*?animation:\s*none[^;]*;[\s\S]*?color:\s*#ef4444/,
+  "reduced motion should disable complaint flashing and leave the indicator stable red",
 );

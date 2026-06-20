@@ -82,6 +82,21 @@ a[href*="google.com/maps"] {
   animation: teleport-mode-flash 1.1s ease-in-out infinite;
 }
 
+@keyframes processing-complaint-flash {
+  0%,
+  100% {
+    color: #facc15;
+  }
+
+  50% {
+    color: #ef4444;
+  }
+}
+
+.processing-complaint-flash {
+  animation: processing-complaint-flash 850ms ease-in-out infinite;
+}
+
 /* Local-only Street View drift; avoids per-frame Google `setPov` tile churn. */
 @keyframes wander-look-float {
   0%,
@@ -111,6 +126,15 @@ a[href*="google.com/maps"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .processing-complaint-flash {
+    animation: none;
+    color: #ef4444;
+  }
+
+  .processing-complaint-flash [data-mode-pulse-glyph] {
+    animation: none !important;
+  }
+
   .street-view-breathing {
     animation: none !important;
     transform: scale(1) !important;
