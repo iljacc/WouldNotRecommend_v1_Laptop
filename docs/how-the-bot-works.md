@@ -40,6 +40,11 @@ It is currently pinned to `en_US-ryan-medium`, a male voice, for every review
 readout. `/tts-lab` can still audition alternate voices without changing the
 live kiosk behavior. Run `npm run setup:piper` on a new laptop to install
 `.venv-piper` and download the configured model into `vendor/piper-voices/`.
+`/api/tts` starts one persistent `scripts/piper-worker.py` process and keeps
+loaded voices in memory, so normal reviews avoid Python and ONNX model startup.
+If that worker fails, the request falls back once to the older one-shot Piper
+command; set `PIPER_PERSISTENT_WORKER=false` only for diagnostics. Successful
+responses expose model-load and synthesis durations through `Server-Timing`.
 Before Piper synthesis, `/api/tts` normalizes review text
 and strips unsafe hidden control characters plus surrogate code units from the
 Piper-only copy; subtitles keep the original review text. If synthesis still

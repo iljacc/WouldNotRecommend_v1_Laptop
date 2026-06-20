@@ -9,12 +9,17 @@ import {
   PIPER_VOICE_MODEL_FILES,
 } from "@/lib/piper-config";
 import { sanitizePiperText } from "@/lib/tts-sanitize";
+import {
+  getPiperWorkerClient,
+  type PiperWorkerSynthesisResult,
+} from "@/lib/piper-worker";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
 const MAX_TEXT_LEN = 8_000;
 const DEFAULT_TTS_ENGINE = "piper";
+const PIPER_WORKER_TIMEOUT_MS = 120_000;
 
 type PiperCommand = {
   command: string;
@@ -53,6 +58,15 @@ function defaultPiperCommand(): PiperCommand {
   if (fs.existsSync(win)) return { command: win, argsPrefix: [] };
   if (fs.existsSync(unix)) return { command: unix, argsPrefix: [] };
   return { command: "piper", argsPrefix: [] };
+}
+
+function defaultPiperPython(): string | null {
+  const root = process.cwd();
+  const pythonWin = path.join(root, ".venv-piper", "Scripts", "python.exe");
+  const pythonUnix = path.join(root, ".venv-piper", "bin", "python");
+  if (fs.existsSync(pythonWin)) return pythonWin;
+  if (fs.existsSync(pythonUnix)) return pythonUnix;
+  return null;
 }
 
 function defaultKokoroPython(): string {
@@ -96,23 +110,34 @@ async function runProcess(options: {
     cwd: process.cwd(),
   });
 
-  if (options.stdinText !== undefined && proc.stdin) {
-    proc.stdin.write(options.stdinText, "utf8");
-    proc.stdin.end();
-  }
+  return new Promise((resolve) => {
+    proc.on("error", (error: NodeJS.ErrnoException) => {
+      resolve({
+        code: error.errno ?? -1,
+        stderr: error.message,
+      });
+    });
 
-  proc.stderr?.on("data", (chunk: Buffer) => {
-    stderr.push(chunk.toString("utf8"));
+    if (options.stdinText !== undefined && proc.stdin) {
+      proc.stdin.on("error", () => {
+        /* Process startup errors are reported through proc.on("error"). */
+      });
+      proc.stdin.write(options.stdinText, "utf8");
+      proc.stdin.end();
+    }
+
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr.push(chunk.toString("utf8"));
+    });
+
+    proc.on("close", (code) => {
+      resolve({ code, stderr: stderr.join("") });
+    });
   });
-
-  const code = await new Promise<number | null>((resolve) => {
-    proc.on("close", resolve);
-  });
-
-  return { code, stderr: stderr.join("") };
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const routeStartedAt = performance.now();
   let body: TtsRequestBody;
   try {
     body = (await request.json()) as TtsRequestBody;
@@ -156,6 +181,9 @@ export async function POST(request: Request): Promise<Response> {
   let code: number | null = null;
   let stderr = "";
   let failureLabel = "TTS synthesis failed";
+  let piperWorkerTiming: PiperWorkerSynthesisResult | null = null;
+  let usedPersistentPiperWorker = false;
+  let usedPiperFallback = false;
   let piperSanitization:
     | {
         originalLength: number;
@@ -260,20 +288,52 @@ export async function POST(request: Request): Promise<Response> {
       sanitizedHash: shortHash(sanitized.text),
     };
 
-    const result = await runProcess({
-      command: piperCommand.command,
-      args: [
-        ...piperCommand.argsPrefix,
-        "-m",
-        modelPath,
-        ...speedArgs,
-        "--output_file",
-        outPath,
-      ],
-      stdinText: `${sanitized.text}\n`,
-    });
-    code = result.code;
-    stderr = result.stderr;
+    const persistentWorkerEnabled =
+      process.env.PIPER_PERSISTENT_WORKER !== "false" &&
+      !process.env.PIPER_PATH;
+    const piperPython = defaultPiperPython();
+
+    if (persistentWorkerEnabled && piperPython) {
+      usedPersistentPiperWorker = true;
+      try {
+        const worker = getPiperWorkerClient({
+          pythonPath: piperPython,
+          scriptPath: path.join(process.cwd(), "scripts", "piper-worker.py"),
+          cwd: process.cwd(),
+          timeoutMs: PIPER_WORKER_TIMEOUT_MS,
+        });
+        piperWorkerTiming = await worker.synthesize({
+          text: sanitized.text,
+          modelPath,
+          outputPath: outPath,
+          lengthScale: piperLengthScale,
+        });
+        code = 0;
+      } catch (error) {
+        usedPiperFallback = true;
+        console.warn("Persistent Piper worker failed; using one-shot fallback", {
+          context: ttsContext,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (!usedPersistentPiperWorker || usedPiperFallback) {
+      const result = await runProcess({
+        command: piperCommand.command,
+        args: [
+          ...piperCommand.argsPrefix,
+          "-m",
+          modelPath,
+          ...speedArgs,
+          "--output_file",
+          outPath,
+        ],
+        stdinText: `${sanitized.text}\n`,
+      });
+      code = result.code;
+      stderr = result.stderr;
+    }
     failureLabel = "Piper synthesis failed";
   }
 
@@ -310,11 +370,38 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Empty audio output" }, { status: 500 });
   }
 
+  const routeTotalMs = Math.round(performance.now() - routeStartedAt);
+  if (engine === "piper") {
+    console.info("Piper synthesis timing", {
+      context: ttsContext,
+      persistentWorker: usedPersistentPiperWorker,
+      fallback: usedPiperFallback,
+      worker: piperWorkerTiming,
+      routeTotalMs,
+    });
+  }
+
+  const responseHeaders: Record<string, string> = {
+    "Content-Type": "audio/wav",
+    "Cache-Control": "no-store",
+  };
+  if (piperWorkerTiming) {
+    responseHeaders["Server-Timing"] = [
+      `piper_model;dur=${piperWorkerTiming.modelLoadMs}`,
+      `piper_synthesis;dur=${piperWorkerTiming.synthesisMs}`,
+      `piper_worker;dur=${piperWorkerTiming.totalMs}`,
+      `tts_route;dur=${routeTotalMs}`,
+    ].join(", ");
+    responseHeaders["X-Piper-Model-Cache"] = piperWorkerTiming.modelCacheHit
+      ? "hit"
+      : "miss";
+  } else if (engine === "piper") {
+    responseHeaders["Server-Timing"] = `tts_route;dur=${routeTotalMs}`;
+    responseHeaders["X-Piper-Model-Cache"] = "fallback";
+  }
+
   return new NextResponse(new Uint8Array(wav), {
     status: 200,
-    headers: {
-      "Content-Type": "audio/wav",
-      "Cache-Control": "no-store",
-    },
+    headers: responseHeaders,
   });
 }

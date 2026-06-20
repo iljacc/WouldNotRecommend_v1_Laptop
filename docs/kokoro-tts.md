@@ -44,4 +44,4 @@ Useful Kokoro settings:
 
 The helper script writes a temporary WAV file and the route returns it to the browser as `audio/wav`.
 
-Current behavior starts a new Python/Kokoro process per review. That is simple and robust, but it adds startup latency. A persistent local TTS worker would reduce delay if the installation needs faster review cadence.
+Kokoro still starts a new Python process per review. Piper uses a separate persistent worker that keeps its ONNX voice loaded; this optimization does not currently apply to Kokoro.

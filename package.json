@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "test": "npm run typecheck && npm run lint && npm run test:no-google-places && npm run test:street-view-css-wiggle && npm run test:street-view-walkable-panorama && npm run test:detect-timeout && npm run test:review-session-repeat && npm run test:monitor-historical-stalls && npm run test:runtime-environment && npm run test:cadence && npm run test:maps-diagnostics && npm run test:geocode && npm run test:piper-voice-rotation && npm run test:import-reviews && npm run test:review-read-history",
+    "test": "npm run typecheck && npm run lint && npm run test:no-google-places && npm run test:street-view-css-wiggle && npm run test:street-view-walkable-panorama && npm run test:detect-timeout && npm run test:review-session-repeat && npm run test:monitor-historical-stalls && npm run test:runtime-environment && npm run test:cadence && npm run test:maps-diagnostics && npm run test:geocode && npm run test:piper-voice-rotation && npm run test:piper-worker && npm run test:import-reviews && npm run test:review-read-history",
     "test:cadence": "node scripts/bot-cadence-behavior.test.mjs",
     "test:detect-timeout": "node scripts/detect-timeout-behavior.test.mjs",
     "test:geocode": "node scripts/geocode-fixed-city.test.mjs",
@@ -14,6 +14,7 @@
     "test:monitor-historical-stalls": "node scripts/monitor-historical-stall-report.test.mjs",
     "test:runtime-environment": "node scripts/runtime-environment-monitor.test.mjs",
     "test:piper-voice-rotation": "vitest run scripts/piper-voice-rotation.test.ts",
+    "test:piper-worker": "vitest run scripts/piper-worker.test.ts scripts/piper-worker-client.test.ts scripts/tts-sanitizer.test.ts",
     "test:review-read-history": "node scripts/review-corpus-read-history.test.cjs",
     "test:review-session-repeat": "node scripts/review-session-repeat-guard.test.mjs",
     "test:street-view-css-wiggle": "node scripts/street-view-css-wiggle.test.mjs",

@@ -48,6 +48,7 @@ For a second gallery laptop, use `docs/installation-laptop.md`.
 | `NEXT_PUBLIC_KIOSK_MODE` | Auto-start `/bot` when true |
 | `NEXT_PUBLIC_CITY_TOUR` | Optional curated multi-city rotation; `true` enables it, default/off is fixed The Hague |
 | `TTS_ENGINE` | `piper` or `kokoro` |
+| `PIPER_PERSISTENT_WORKER` | Default `true`; set `false` to force slower one-shot Piper for diagnostics |
 | `NEXT_PUBLIC_BOT_CCTV_OVERLAY` | Optional `/bot` overlay |
 | `NEXT_PUBLIC_ADMIN_PASSWORD` | Optional local admin gate |
 | `GSV_KIOSK` | `npm start` browser launcher toggle; `0` disables, `1` forces |
@@ -105,6 +106,7 @@ No Places API key is needed or used.
 - When a review target is selected, the bot stops walking, pans toward the business, reads the review while stopped, then returns to its wander heading before moving again.
 - `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
 - `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.
+- `/api/tts` reuses a persistent `scripts/piper-worker.py` process. The worker caches loaded voices, serializes synthesis requests, returns timing metadata, and restarts on a later request after exit. Worker failure falls back once to the one-shot Piper CLI. Successful responses include `Server-Timing` and `X-Piper-Model-Cache` headers.
 - `/api/tts` sanitizes only the Piper-bound copy by normalizing Unicode and removing unsafe hidden control characters plus surrogate code units; subtitles keep the original review text. On synthesis failure, check the server console for full Piper stderr plus place/review context.
 - `ReviewManager` queries local nearby candidates after enough time and movement have passed.
 - Local nearby lookup is nearest-neighbor, capped by `PLACES.LOCAL_CORPUS_NEAREST_PLACE_LIMIT`.
