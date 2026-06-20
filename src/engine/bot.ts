@@ -784,6 +784,7 @@ export class Bot {
       this.onSubtitleChange?.(null);
       this.subtitleHideTimer = null;
     }, SUBTITLE_TIMING.LINGER_AFTER_COMPLETE_MS + SUBTITLE_TIMING.FADE_OUT_MS);
+    await this.sleep(getBotSettings().timing.postTtsHoldMs);
     if (this.running && this.context.state === BotState.DELIVER) {
       this.dispatch({ type: "DELIVER_COMPLETE" });
     }

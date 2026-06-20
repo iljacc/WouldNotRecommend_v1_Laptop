@@ -35,6 +35,7 @@ export interface BotTimingSettings {
   alignHoldMs: number;
   detectMaxWaitMs: number;
   reviewAlignDuration: number;
+  postTtsHoldMs: number;
   returnPanDuration: number;
   returnStateTimerMs: number;
   wanderStepInterval: number;
@@ -92,6 +93,7 @@ function defaultTiming(): BotTimingSettings {
     alignHoldMs: TIMING.ALIGN_HOLD_MS,
     detectMaxWaitMs: TIMING.DETECT_MAX_WAIT_MS,
     reviewAlignDuration: TIMING.REVIEW_ALIGN_DURATION,
+    postTtsHoldMs: TIMING.POST_TTS_HOLD_MS,
     returnPanDuration: TIMING.RETURN_PAN_DURATION,
     returnStateTimerMs: TIMING.RETURN_STATE_TIMER_MS,
     wanderStepInterval: TIMING.WANDER_STEP_INTERVAL,

@@ -76,7 +76,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 1. **Wander:** move through Street View and periodically check local review candidates.
 2. **Detect:** stop walking, face the chosen business location, and briefly hold the view.
-3. **Deliver:** read the selected review aloud with subtitles and optional screenshot logging while still stopped.
+3. **Deliver:** read the selected review aloud with subtitles, remain in Processing for one second after speech ends, and optionally log a screenshot while still stopped.
 4. **Return:** pan back toward the wander heading, then continue walking.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
@@ -99,6 +99,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | --- | ---: | --- |
 | `queryDistanceThreshold` | 75 m | Minimum movement before another local candidate query can run |
 | `queryMinInterval` | 9,000 ms | Minimum time between local candidate queries |
+| `POST_TTS_HOLD_MS` | 1,000 ms | Processing hold after speech ends before the return pan begins |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |
 | `detectionRadius` | 700 m | Kept for settings continuity; local candidates bypass the hard cutoff |
 | `LOCAL_CORPUS_NEAREST_PLACE_LIMIT` | 80 | Max local place candidates returned per position |
