@@ -15,6 +15,13 @@ function assert(condition, message) {
   }
 }
 
+function assertClose(actual, expected, epsilon, message) {
+  assert(
+    Math.abs(actual - expected) <= epsilon,
+    `${message} Expected ${expected}, received ${actual}.`,
+  );
+}
+
 const BotState = {
   WANDER: "WANDER",
   DETECT: "DETECT",
@@ -98,10 +105,17 @@ const pitch = Number(
 );
 const drift = Number(config.match(/WANDER_LOOK_DRIFT:\s*([0-9.]+)/)?.[1]);
 
-assert(Number.isFinite(yaw) && yaw > 0 && yaw <= 2, "Yaw wiggle should stay very slight.");
 assert(
-  Number.isFinite(pitch) && pitch > 0 && pitch <= 0.5,
-  "Pitch wiggle should stay very slight.",
+  yaw === 12.1,
+  "Yaw wiggle should retain the tuned 12.1 CSS transform default.",
+);
+assert(
+  pitch === 1.8,
+  "Pitch wiggle should retain the tuned 1.8 CSS transform default.",
+);
+assert(
+  drift === 2.5,
+  "Drift should retain the tuned 2.5 CSS animation default.",
 );
 
 assert(
@@ -129,8 +143,18 @@ const stoppedTeleportStyle = getStreetViewEffectStyle(
   defaultSettings,
 );
 const wanderX = Number.parseFloat(wanderStyle["--wander-float-x"]);
+const wanderY = Number.parseFloat(wanderStyle["--wander-float-y"]);
+const wanderRotate = Number.parseFloat(wanderStyle["--wander-float-rotate"]);
 const stoppedX = Number.parseFloat(stoppedTeleportStyle["--wander-float-x"]);
+const stoppedY = Number.parseFloat(stoppedTeleportStyle["--wander-float-y"]);
+const stoppedRotate = Number.parseFloat(
+  stoppedTeleportStyle["--wander-float-rotate"],
+);
+const durationSec = Number.parseFloat(wanderStyle.animation.split(" ")[1]);
 const defaultScale = Number.parseFloat(wanderStyle["--wander-float-scale"]);
+const stoppedScale = Number.parseFloat(
+  stoppedTeleportStyle["--wander-float-scale"],
+);
 const cappedMotionStyle = getStreetViewEffectStyle(
   BotState.WANDER,
   "none",
@@ -149,26 +173,76 @@ const cappedScale = Number.parseFloat(
   cappedMotionStyle["--wander-float-scale"],
 );
 
-function requiredScaleForViewport(width, height) {
-  const radians = (cappedRotate * Math.PI) / 180;
-  const rotatedWidth =
-    width * Math.cos(radians) + height * Math.sin(radians);
-  const rotatedHeight =
-    height * Math.cos(radians) + width * Math.sin(radians);
-  return Math.max(
-    (rotatedWidth + 2 * cappedX) / width,
-    (rotatedHeight + 2 * cappedY) / height,
-  );
+const keyframeCoefficients = [
+  { position: "0/100", x: 0, y: 0, rotate: 0 },
+  { position: "24", x: 1, y: -0.45, rotate: 1 },
+  { position: "52", x: -0.72, y: 1, rotate: -0.65 },
+  { position: "78", x: 0.34, y: 0.5, rotate: 0.45 },
+];
+
+function assertOverscanContains(
+  styleName,
+  width,
+  height,
+  xAmplitude,
+  yAmplitude,
+  rotateAmplitude,
+  scale,
+) {
+  for (const keyframe of keyframeCoefficients) {
+    const radians = Math.abs(
+      (keyframe.rotate * rotateAmplitude * Math.PI) / 180,
+    );
+    const projectedHalfWidth =
+      (width * Math.cos(radians) + height * Math.abs(Math.sin(radians))) / 2;
+    const projectedHalfHeight =
+      (height * Math.cos(radians) + width * Math.abs(Math.sin(radians))) / 2;
+    const coveredHalfWidth =
+      scale * (projectedHalfWidth - Math.abs(keyframe.x * xAmplitude));
+    const coveredHalfHeight =
+      scale * (projectedHalfHeight - Math.abs(keyframe.y * yAmplitude));
+
+    assert(
+      coveredHalfWidth + 0.0001 >= width / 2,
+      `${styleName} keyframe ${keyframe.position}% leaves horizontal exposure at ${width}x${height}: covers ${coveredHalfWidth.toFixed(4)}, needs ${(width / 2).toFixed(4)}.`,
+    );
+    assert(
+      coveredHalfHeight + 0.0001 >= height / 2,
+      `${styleName} keyframe ${keyframe.position}% leaves vertical exposure at ${width}x${height}: covers ${coveredHalfHeight.toFixed(4)}, needs ${(height / 2).toFixed(4)}.`,
+    );
+  }
 }
 
+for (const state of Object.values(BotState)) {
+  const stateStyle = getStreetViewEffectStyle(state, "none", defaultSettings);
+  assert(
+    stateStyle.animation !== "none",
+    `Street View breathing should remain enabled in ${state}.`,
+  );
+}
 assert(
   stoppedTeleportStyle.animation !== "none",
-  "Street View breathing should remain enabled outside WANDER and during teleport.",
+  "Street View breathing should remain enabled during teleport.",
 );
 assert(
   stoppedX > 0 && stoppedX < wanderX,
   "Stopped Street View breathing should be numerically quieter than WANDER.",
 );
+assertClose(wanderX, 12.1 * 3.8, 0.005, "WANDER horizontal motion changed.");
+assertClose(stoppedX, 12.1 * 3.8 * 0.61, 0.005, "Stopped horizontal motion changed.");
+assertClose(wanderY, 18, 0.005, "WANDER vertical motion changed.");
+assertClose(stoppedY, 18 * 0.61, 0.005, "Stopped vertical motion changed.");
+assertClose(wanderRotate, 12.1 * 0.075, 0.001, "WANDER rotation changed.");
+assertClose(
+  stoppedRotate,
+  12.1 * 0.075 * 0.61,
+  0.001,
+  "Stopped rotation changed.",
+);
+assert(durationSec === 4, "The irregular CSS keyframe cycle should last exactly four seconds.");
+assert(cappedX === 54, "Capped horizontal motion should remain exactly 54px.");
+assert(cappedY === 28, "Capped vertical motion should remain exactly 28px.");
+assert(cappedRotate === 1.05, "Capped rotation should remain exactly 1.05deg.");
 assert(
   defaultScale >= 1.03,
   "Default Street View breathing should retain safe overscan on small kiosk viewports.",
@@ -182,10 +256,32 @@ for (const [width, height] of [
   [1024, 768],
   [1080, 1920],
 ]) {
-  const requiredScale = requiredScaleForViewport(width, height);
-  assert(
-    cappedScale + 0.0001 >= requiredScale,
-    `Capped overscan ${cappedScale} should cover ${width}x${height} (requires ${requiredScale.toFixed(4)}).`,
+  assertOverscanContains(
+    "Default WANDER",
+    width,
+    height,
+    wanderX,
+    wanderY,
+    wanderRotate,
+    defaultScale,
+  );
+  assertOverscanContains(
+    "Default stopped",
+    width,
+    height,
+    stoppedX,
+    stoppedY,
+    stoppedRotate,
+    stoppedScale,
+  );
+  assertOverscanContains(
+    "Capped WANDER",
+    width,
+    height,
+    cappedX,
+    cappedY,
+    cappedRotate,
+    cappedScale,
   );
 }
 assert(

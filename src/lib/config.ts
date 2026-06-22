@@ -118,16 +118,16 @@ export const STREET_VIEW = {
   /** After each wander step, blend POV to the link heading (reduces snap). */
   STEP_HEADING_BLEND_MS: 520,
   /**
-   * While walking, add a very slight visual wiggle to the Street View layer.
+   * While walking, add a strong visual wobble to the Street View layer.
    * CSS-only: real per-frame `setPov` is avoided to reduce Google imagery/CDN churn.
    */
   WANDER_LOOK_FLOAT_ENABLED: true,
-  /** Max yaw sway (deg) — stays “mostly forward” along the path. */
-  WANDER_LOOK_SWAY_DEG: 1.2,
-  /** Subtle pitch sway (deg) for the local-only CSS wiggle. */
-  WANDER_LOOK_PITCH_SWAY_DEG: 0.25,
-  /** Base angular “speed” of the sway (scales `sin` time). */
-  WANDER_LOOK_DRIFT: 0.42,
+  /** Horizontal CSS transform intensity; converted to pixels and capped by VisualEffects. */
+  WANDER_LOOK_SWAY_DEG: 12.1,
+  /** Vertical CSS transform intensity; converted to pixels and capped by VisualEffects. */
+  WANDER_LOOK_PITCH_SWAY_DEG: 1.8,
+  /** CSS animation drift rate; higher values shorten the wobble cycle. */
+  WANDER_LOOK_DRIFT: 2.5,
 } as const;
 
 export const VISUAL = {
