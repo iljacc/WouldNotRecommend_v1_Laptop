@@ -49,8 +49,10 @@ export function HUD({
     <div className="pointer-events-none absolute inset-0 z-[38] font-mono">
       <div className="absolute top-6 left-6 sm:top-8 sm:left-8">
         <ReviewStatsChip
+          key={`review-stats-${reviewsToday}-${lifetimeReviewsTotal}`}
           reviewsToday={reviewsToday}
           lifetimeTotal={lifetimeReviewsTotal}
+          celebrate={reviewsToday !== null && lifetimeReviewsTotal !== null}
         />
       </div>
 

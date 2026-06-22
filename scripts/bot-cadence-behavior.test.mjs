@@ -14,6 +14,16 @@ const controller = readFileSync(
   join(root, "src/engine/street-view-controller.ts"),
   "utf8",
 );
+const hud = readFileSync(join(root, "src/components/HUD.tsx"), "utf8");
+const modeIndicator = readFileSync(
+  join(root, "src/components/ModeIndicator.tsx"),
+  "utf8",
+);
+const modePulseGlyph = readFileSync(
+  join(root, "src/components/ModePulseGlyph.tsx"),
+  "utf8",
+);
+const globalCss = readFileSync(join(root, "src/app/globals.css"), "utf8");
 
 function numericConst(name) {
   const match = config.match(new RegExp(`${name}:\\s*([\\d_]+)`));
@@ -40,6 +50,18 @@ assert.equal(
 );
 
 assert.equal(
+  numericConst("ALIGN_PAN_MS"),
+  2500,
+  "business alignment should use a deliberate 2.5 second pan",
+);
+
+assert.equal(
+  numericConst("ALIGN_HOLD_MS"),
+  950,
+  "the bot should wait 950 ms after the business pan before speaking",
+);
+
+assert.equal(
   numericConst("RETURN_STATE_TIMER_MS"),
   1400,
   "return should be brief so reviews chain quickly",
@@ -63,8 +85,33 @@ const businessDetectedBlock = stateMachine.match(
 assert.ok(businessDetectedBlock, "Missing BUSINESS_DETECTED transition");
 assert.match(
   businessDetectedBlock[0],
-  /\{ type: "STOP_WALKING" \}/,
-  "business detection must stop Street View movement before reading",
+  /effects:\s*\[\s*\{ type: "STOP_WALKING" \},\s*\{ type: "PLAY_BLEEP" \},\s*\{ type: "CROSSFADE_TO_B" \},\s*\{ type: "PAN_TO_BUSINESS", bearingDeg: event\.business\.bearing \},\s*\]/,
+  "business detection must stop, bleep, crossfade, then pan",
+);
+
+const deliverCompleteBlock = stateMachine.match(
+  /event\.type === "DELIVER_COMPLETE"[\s\S]*?return null;/,
+);
+assert.ok(deliverCompleteBlock, "Missing DELIVER_COMPLETE transition");
+assert.match(
+  deliverCompleteBlock[0],
+  /effects:\s*\[\s*\{ type: "UNDUCK_AMBIENT" \},\s*\{ type: "LOG_REVIEW" \},\s*\{ type: "INCREMENT_COUNTER" \},\s*\{ type: "PLAY_BLOOP" \},\s*\{ type: "PAN_TO_WANDER_HEADING" \},\s*\]/,
+  "delivery completion must unduck, log, count, bloop, then pan",
+);
+
+const returnCompleteBlock = stateMachine.match(
+  /event\.type === "RETURN_COMPLETE"[\s\S]*?return null;/,
+);
+assert.ok(returnCompleteBlock, "Missing RETURN_COMPLETE transition");
+assert.doesNotMatch(
+  returnCompleteBlock[0],
+  /PLAY_BLOOP/,
+  "return completion must not play the exit bloop",
+);
+assert.match(
+  returnCompleteBlock[0],
+  /effects:\s*\[\s*\{ type: "CROSSFADE_TO_A" \},\s*\{ type: "START_WALKING" \},\s*\]/,
+  "return completion must crossfade before walking resumes",
 );
 
 assert.match(
@@ -77,6 +124,24 @@ assert.match(
   controller,
   /this\.stepForward\(\);[\s\S]*?this\.moveInterval = window\.setInterval/,
   "startWalking should take a step immediately before waiting for the interval",
+);
+
+assert.match(
+  controller,
+  /function easeInOutSine\(t: number\): number \{[\s\S]*?Math\.min\(1, Math\.max\(0, t\)\)[\s\S]*?-\(Math\.cos\(Math\.PI \* x\) - 1\) \/ 2;[\s\S]*?\}/,
+  "controller should define a clamped sine ease for scripted pans",
+);
+
+assert.match(
+  controller,
+  /panToHeading[\s\S]*?runHeadingMotion\(fromHeading, targetHeading, durationMs, easeInOutSine\)/,
+  "panToHeading should use gentler sine easing",
+);
+
+assert.match(
+  controller,
+  /stepForward[\s\S]*?runHeadingMotion\([\s\S]*?easeInOutQuint/,
+  "linked step heading blending should retain quint easing",
 );
 
 assert.doesNotMatch(
@@ -96,3 +161,19 @@ assert.match(
   /business\.source === "local"[\s\S]*?business\.distance <= places\.detectionRadius/,
   "local corpus candidates should bypass detection radius while Google candidates remain radius-limited",
 );
+
+assert.doesNotMatch(hud, /processing-rainbow-cycle/, "HUD should retain the original Processing presentation");
+
+assert.match(
+  modeIndicator,
+  /m === "Searching" \? "text-yellow-400" : "text-green-400"/,
+  "the original indicator should keep Searching yellow and Processing green",
+);
+
+assert.match(
+  modePulseGlyph,
+  /cityTourTeleportBlink \? "text-violet-400" : "text-white"/,
+  "the original glyph should remain white outside scheduled teleport",
+);
+
+assert.doesNotMatch(globalCss, /processing-rainbow-cycle/, "Processing rainbow CSS should be removed");

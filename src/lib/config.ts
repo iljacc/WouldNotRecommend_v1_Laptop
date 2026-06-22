@@ -2,15 +2,15 @@ import type { LatLng } from "./types";
 
 export const TIMING = {
   /** Rotation when facing the business from the road. */
-  ALIGN_PAN_MS: 1_350,
+  ALIGN_PAN_MS: 2_500,
   /** Hold (ms) after align pan finishes, still facing shop, before next state. */
-  ALIGN_HOLD_MS: 450,
+  ALIGN_HOLD_MS: 950,
   /** Hard cap for DETECT before review delivery starts, even if browser rendering pauses. */
   DETECT_MAX_WAIT_MS: 6_000,
   /** Legacy DETECT timer setting; the bot now advances after align pan + hold completes. */
   REVIEW_ALIGN_DURATION: 1_800,
-  /** Stay in DELIVER/Processing briefly after speech ends before returning to walking. */
-  POST_TTS_HOLD_MS: 1_000,
+  /** Stay still in DELIVER for two seconds after speech ends before the return pan. */
+  POST_TTS_HOLD_MS: 2_000,
   /** Smooth rotation back toward the wander / road heading after a review. */
   RETURN_PAN_DURATION: 1_200,
   /** RETURN state timer — must run slightly longer than the pan animation so we never snap early. */
@@ -118,16 +118,16 @@ export const STREET_VIEW = {
   /** After each wander step, blend POV to the link heading (reduces snap). */
   STEP_HEADING_BLEND_MS: 520,
   /**
-   * While walking, add a very slight visual wiggle to the Street View layer.
+   * While walking, add a strong visual wobble to the Street View layer.
    * CSS-only: real per-frame `setPov` is avoided to reduce Google imagery/CDN churn.
    */
   WANDER_LOOK_FLOAT_ENABLED: true,
-  /** Max yaw sway (deg) — stays “mostly forward” along the path. */
-  WANDER_LOOK_SWAY_DEG: 1.2,
-  /** Subtle pitch sway (deg) for the local-only CSS wiggle. */
-  WANDER_LOOK_PITCH_SWAY_DEG: 0.25,
-  /** Base angular “speed” of the sway (scales `sin` time). */
-  WANDER_LOOK_DRIFT: 0.42,
+  /** Horizontal CSS transform intensity; converted to pixels and capped by VisualEffects. */
+  WANDER_LOOK_SWAY_DEG: 12.1,
+  /** Vertical CSS transform intensity; converted to pixels and capped by VisualEffects. */
+  WANDER_LOOK_PITCH_SWAY_DEG: 1.8,
+  /** CSS animation drift rate; 1.25 produces the tuned eight-second cycle. */
+  WANDER_LOOK_DRIFT: 1.25,
 } as const;
 
 export const VISUAL = {

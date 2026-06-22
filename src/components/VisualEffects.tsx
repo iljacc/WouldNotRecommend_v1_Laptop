@@ -37,27 +37,33 @@ export function getStreetViewEffectStyle(
         : `filter 120ms linear`
     : `filter ${VISUAL.COLOR_TRANSITION}ms ease`;
 
-  const floatEnabled =
-    botState === BotState.WANDER &&
-    teleportPhase === "none" &&
-    Boolean(streetView?.wanderLookFloatEnabled);
+  const floatEnabled = Boolean(streetView?.wanderLookFloatEnabled);
+  const walking = botState === BotState.WANDER;
+  const horizontalIntensity = walking ? 1.5 : 0.305;
+  const verticalIntensity = walking ? 0.5 : 0.305;
+  const rotationIntensity = walking ? 1 : 0.305;
   const drift = Math.max(0.01, streetView?.wanderLookDrift ?? 0.38);
   const sway = Math.max(0, streetView?.wanderLookSwayDeg ?? 0);
   const pitchSway = Math.max(0, streetView?.wanderLookPitchSwayDeg ?? 0);
-  const xPx = Math.min(54, sway * 3.8);
-  const yPx = Math.min(28, pitchSway * 10);
-  const rotateDeg = Math.min(1.05, sway * 0.075);
-  const durationSec = Math.min(34, Math.max(12, 10 / drift));
-  const scale = 1 + Math.max(xPx / 760, yPx / 430, 0.012);
+  const xPx = Math.min(72, sway * 3.8 * horizontalIntensity);
+  const yPx = Math.min(28, pitchSway * 10 * verticalIntensity);
+  const rotateDeg = Math.min(1.05, sway * 0.075 * rotationIntensity);
+  const durationSec = Math.min(34, Math.max(4, 10 / drift));
+  // The floor covers small kiosks; amplitude padding includes an inverse-corner safety reserve.
+  const amplitudePadding =
+    xPx * 0.00175 + yPx * 0.00175 + rotateDeg * 0.012;
+  const scale = 1 + Math.max(0.03, amplitudePadding + 0.01);
 
   const style: CSSProperties & Record<`--${string}`, string | number> = {
     filter,
     transform: floatEnabled ? undefined : "scale(1)",
-    transition: `${filterTransition}, transform 500ms ease`,
+    transition: `${filterTransition}, transform 500ms ease, --wander-float-x 1.2s ease, --wander-float-y 1.2s ease, --wander-float-rotate 1.2s ease, --wander-float-scale 1.2s ease`,
     transformOrigin: "center center",
     animation: floatEnabled
       ? `wander-look-float ${durationSec}s ease-in-out infinite`
       : "none",
+    animationPlayState:
+      botState === BotState.DELIVER ? "paused" : "running",
     willChange: floatEnabled ? "transform, filter" : "filter",
     "--wander-float-x": `${xPx.toFixed(2)}px`,
     "--wander-float-y": `${yPx.toFixed(2)}px`,

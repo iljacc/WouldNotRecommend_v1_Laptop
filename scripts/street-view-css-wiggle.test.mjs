@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
 
 const root = process.cwd();
 const config = readFileSync(join(root, "src/lib/config.ts"), "utf8");
 const effects = readFileSync(join(root, "src/components/VisualEffects.tsx"), "utf8");
+const botPage = readFileSync(join(root, "src/app/bot/page.tsx"), "utf8");
 const css = readFileSync(join(root, "src/app/globals.css"), "utf8");
 
 function assert(condition, message) {
@@ -11,6 +14,85 @@ function assert(condition, message) {
     throw new Error(message);
   }
 }
+
+function assertClose(actual, expected, epsilon, message) {
+  assert(
+    Math.abs(actual - expected) <= epsilon,
+    `${message} Expected ${expected}, received ${actual}.`,
+  );
+}
+
+const BotState = {
+  WANDER: "WANDER",
+  DETECT: "DETECT",
+  DELIVER: "DELIVER",
+  RETURN: "RETURN",
+  TELEPORT: "TELEPORT",
+};
+const grading = {
+  brightness: 1,
+  saturate: 1,
+  hueRotate: 0,
+};
+const sideEffectCalls = {
+  fetch: 0,
+  setTimeout: 0,
+  setInterval: 0,
+  requestAnimationFrame: 0,
+  XMLHttpRequest: 0,
+  Image: 0,
+  createImageBitmap: 0,
+  google: 0,
+};
+const poison = (name) => () => {
+  sideEffectCalls[name] += 1;
+  throw new Error(`getStreetViewEffectStyle called ${name}`);
+};
+const compiledEffects = ts.transpileModule(effects, {
+  compilerOptions: {
+    jsx: ts.JsxEmit.ReactJSX,
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+  },
+}).outputText;
+const effectsModule = { exports: {} };
+const requireEffectDependency = (id) => {
+  if (id === "@/lib/config") {
+    return {
+      TIMING: { TELEPORT_FADE_OUT: 1, TELEPORT_FADE_IN: 1 },
+      VISUAL: {
+        COLOR_GRADING: Object.fromEntries(
+          Object.values(BotState).map((state) => [state, grading]),
+        ),
+        COLOR_TRANSITION: 1,
+      },
+    };
+  }
+  if (id === "@/lib/types") return { BotState };
+  if (id === "react/jsx-runtime") return { jsx: () => null };
+  throw new Error(`Unexpected VisualEffects dependency: ${id}`);
+};
+const runtimeContext = {
+  fetch: poison("fetch"),
+  setTimeout: poison("setTimeout"),
+  setInterval: poison("setInterval"),
+  requestAnimationFrame: poison("requestAnimationFrame"),
+  XMLHttpRequest: poison("XMLHttpRequest"),
+  Image: poison("Image"),
+  createImageBitmap: poison("createImageBitmap"),
+};
+Object.defineProperty(runtimeContext, "google", {
+  get() {
+    sideEffectCalls.google += 1;
+    throw new Error("getStreetViewEffectStyle accessed google");
+  },
+});
+runtimeContext.window = runtimeContext;
+vm.runInNewContext(
+  `(function (require, module, exports) { ${compiledEffects}\n})`,
+  runtimeContext,
+)(requireEffectDependency, effectsModule, effectsModule.exports);
+const { getStreetViewEffectStyle } = effectsModule.exports;
 
 assert(
   /WANDER_LOOK_FLOAT_ENABLED:\s*true/.test(config),
@@ -21,11 +103,19 @@ const yaw = Number(config.match(/WANDER_LOOK_SWAY_DEG:\s*([0-9.]+)/)?.[1]);
 const pitch = Number(
   config.match(/WANDER_LOOK_PITCH_SWAY_DEG:\s*([0-9.]+)/)?.[1],
 );
+const drift = Number(config.match(/WANDER_LOOK_DRIFT:\s*([0-9.]+)/)?.[1]);
 
-assert(Number.isFinite(yaw) && yaw > 0 && yaw <= 2, "Yaw wiggle should stay very slight.");
 assert(
-  Number.isFinite(pitch) && pitch > 0 && pitch <= 0.5,
-  "Pitch wiggle should stay very slight.",
+  yaw === 12.1,
+  "Yaw wiggle should retain the tuned 12.1 CSS transform default.",
+);
+assert(
+  pitch === 1.8,
+  "Pitch wiggle should retain the tuned 1.8 CSS transform default.",
+);
+assert(
+  drift === 1.25,
+  "Drift should use the slower 1.25 CSS animation default.",
 );
 
 assert(
@@ -34,9 +124,248 @@ assert(
 );
 assert(
   !effects.includes("setPov(") && !effects.includes(".setPov"),
-  "CSS wiggle must not update the Google Street View POV.",
+  "VisualEffects.tsx must not explicitly call setPov.",
+);
+const defaultSettings = {
+  wanderLookFloatEnabled: true,
+  wanderLookSwayDeg: yaw,
+  wanderLookPitchSwayDeg: pitch,
+  wanderLookDrift: drift,
+};
+const wanderStyle = getStreetViewEffectStyle(
+  BotState.WANDER,
+  "none",
+  defaultSettings,
+);
+const stoppedTeleportStyle = getStreetViewEffectStyle(
+  BotState.DELIVER,
+  "warp",
+  defaultSettings,
+);
+const detectStyle = getStreetViewEffectStyle(BotState.DETECT, "none", defaultSettings);
+const returnStyle = getStreetViewEffectStyle(BotState.RETURN, "none", defaultSettings);
+const wanderX = Number.parseFloat(wanderStyle["--wander-float-x"]);
+const wanderY = Number.parseFloat(wanderStyle["--wander-float-y"]);
+const wanderRotate = Number.parseFloat(wanderStyle["--wander-float-rotate"]);
+const stoppedX = Number.parseFloat(stoppedTeleportStyle["--wander-float-x"]);
+const stoppedY = Number.parseFloat(stoppedTeleportStyle["--wander-float-y"]);
+const stoppedRotate = Number.parseFloat(
+  stoppedTeleportStyle["--wander-float-rotate"],
+);
+const durationSec = Number.parseFloat(wanderStyle.animation.split(" ")[1]);
+const defaultScale = Number.parseFloat(wanderStyle["--wander-float-scale"]);
+const stoppedScale = Number.parseFloat(
+  stoppedTeleportStyle["--wander-float-scale"],
+);
+const cappedMotionStyle = getStreetViewEffectStyle(
+  BotState.WANDER,
+  "none",
+  {
+    ...defaultSettings,
+    wanderLookSwayDeg: 100,
+    wanderLookPitchSwayDeg: 100,
+  },
+);
+const cappedX = Number.parseFloat(cappedMotionStyle["--wander-float-x"]);
+const cappedY = Number.parseFloat(cappedMotionStyle["--wander-float-y"]);
+const cappedRotate = Number.parseFloat(
+  cappedMotionStyle["--wander-float-rotate"],
+);
+const cappedScale = Number.parseFloat(
+  cappedMotionStyle["--wander-float-scale"],
+);
+
+const keyframeCoefficients = [
+  { position: "0/100", x: 0, y: 0, rotate: 0 },
+  { position: "24", x: 1, y: -0.45, rotate: 1 },
+  { position: "52", x: -0.72, y: 1, rotate: -0.65 },
+  { position: "78", x: 0.34, y: 0.5, rotate: 0.45 },
+];
+
+function assertOverscanContains(
+  styleName,
+  width,
+  height,
+  xAmplitude,
+  yAmplitude,
+  rotateAmplitude,
+  scale,
+) {
+  for (const keyframe of keyframeCoefficients) {
+    const radians = (keyframe.rotate * rotateAmplitude * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const translateX = keyframe.x * xAmplitude;
+    const translateY = keyframe.y * yAmplitude;
+
+    for (const cornerX of [-width / 2, width / 2]) {
+      for (const cornerY of [-height / 2, height / 2]) {
+        const untranslatedX = cornerX - translateX;
+        const untranslatedY = cornerY - translateY;
+        const sourceX =
+          (cos * untranslatedX + sin * untranslatedY) / scale;
+        const sourceY =
+          (-sin * untranslatedX + cos * untranslatedY) / scale;
+
+        assert(
+          Math.abs(sourceX) <= width / 2 + 0.0001,
+          `${styleName} keyframe ${keyframe.position}% maps viewport corner (${cornerX}, ${cornerY}) outside source width at ${width}x${height}: x=${sourceX.toFixed(4)}, limit=${(width / 2).toFixed(4)}.`,
+        );
+        assert(
+          Math.abs(sourceY) <= height / 2 + 0.0001,
+          `${styleName} keyframe ${keyframe.position}% maps viewport corner (${cornerX}, ${cornerY}) outside source height at ${width}x${height}: y=${sourceY.toFixed(4)}, limit=${(height / 2).toFixed(4)}.`,
+        );
+      }
+    }
+  }
+}
+
+for (const state of Object.values(BotState)) {
+  const stateStyle = getStreetViewEffectStyle(state, "none", defaultSettings);
+  assert(
+    stateStyle.animation !== "none",
+    `Street View breathing should remain enabled in ${state}.`,
+  );
+}
+assert(
+  stoppedTeleportStyle.animation !== "none",
+  "Street View breathing should remain enabled during teleport.",
+);
+assert(
+  stoppedTeleportStyle.animationPlayState === "paused",
+  "Spoken delivery should freeze the exact current wobble frame.",
+);
+for (const [name, style] of [["WANDER", wanderStyle], ["DETECT", detectStyle], ["RETURN", returnStyle]]) {
+  assert(
+    style.animationPlayState === "running",
+    `${name} should keep the wobble running, including camera turns.`,
+  );
+}
+assert(
+  stoppedX > 0 && stoppedX < wanderX,
+  "Stopped Street View breathing should be numerically quieter than WANDER.",
+);
+assertClose(wanderX, 12.1 * 3.8 * 1.5, 0.005, "WANDER horizontal motion changed.");
+assertClose(stoppedX, 12.1 * 3.8 * 0.305, 0.005, "Stopped horizontal motion changed.");
+assertClose(wanderY, 18 * 0.5, 0.005, "WANDER vertical motion changed.");
+assertClose(stoppedY, 18 * 0.305, 0.005, "Stopped vertical motion changed.");
+assertClose(wanderRotate, 12.1 * 0.075, 0.001, "WANDER rotation changed.");
+assertClose(
+  stoppedRotate,
+  12.1 * 0.075 * 0.305,
+  0.001,
+  "Stopped rotation changed.",
+);
+for (const [name, style] of [["DETECT", detectStyle], ["RETURN", returnStyle]]) {
+  assertClose(Number.parseFloat(style["--wander-float-x"]), stoppedX, 0.005, `${name} should retain stationary horizontal wobble through the turn.`);
+  assertClose(Number.parseFloat(style["--wander-float-y"]), stoppedY, 0.005, `${name} should retain stationary vertical wobble through the turn.`);
+  assert(style.animation === stoppedTeleportStyle.animation, `${name} should keep the same continuous wobble animation.`);
+}
+assert(durationSec === 8, "The irregular CSS keyframe cycle should last exactly eight seconds.");
+assert(cappedX === 72, "Capped horizontal motion should allow the stronger 72px ceiling.");
+assert(cappedY === 28, "Capped vertical motion should remain exactly 28px.");
+assert(cappedRotate === 1.05, "Capped rotation should remain exactly 1.05deg.");
+assertClose(defaultScale, 1.1573, 0.00015, "Default WANDER safety scale changed.");
+assertClose(stoppedScale, 1.0474, 0.00015, "Default stopped safety scale changed.");
+assertClose(cappedScale, 1.1976, 0.00015, "Capped WANDER safety scale changed.");
+assert(
+  defaultScale >= 1.03,
+  "Default Street View breathing should retain safe overscan on small kiosk viewports.",
+);
+assert(
+  cappedScale >= 1.15,
+  "Capped Street View motion should retain at least 15% overscan.",
+);
+for (const [width, height] of [
+  [1366, 768],
+  [1024, 768],
+  [1080, 1920],
+]) {
+  assertOverscanContains(
+    "Default WANDER",
+    width,
+    height,
+    wanderX,
+    wanderY,
+    wanderRotate,
+    defaultScale,
+  );
+  assertOverscanContains(
+    "Default stopped",
+    width,
+    height,
+    stoppedX,
+    stoppedY,
+    stoppedRotate,
+    stoppedScale,
+  );
+  assertOverscanContains(
+    "Capped WANDER",
+    width,
+    height,
+    cappedX,
+    cappedY,
+    cappedRotate,
+    cappedScale,
+  );
+}
+assert(
+  Object.values(sideEffectCalls).every((count) => count === 0),
+  `Style computation must remain local-only: ${JSON.stringify(sideEffectCalls)}`,
+);
+assert(
+  /className="[^"]*street-view-breathing[^"]*"/.test(botPage),
+  "The transformed Street View wrapper should expose the breathing class.",
 );
 assert(
   /@keyframes\s+wander-look-float/.test(css),
   "CSS should define the local-only wander wiggle keyframes.",
+);
+for (const propertyName of ["x", "y", "rotate", "scale"]) {
+  assert(
+    css.includes(`@property --wander-float-${propertyName}`),
+    `CSS should register --wander-float-${propertyName} for smooth state-profile interpolation.`,
+  );
+}
+for (const propertyName of ["x", "y", "rotate", "scale"]) {
+  assert(
+    String(wanderStyle.transition).includes(`--wander-float-${propertyName}`),
+    `Street View style should transition --wander-float-${propertyName} across turns.`,
+  );
+}
+const keyframesCss = css.match(
+  /@keyframes\s+wander-look-float\s*\{([\s\S]*?)\n\s*@media/,
+)?.[1];
+assert(keyframesCss, "CSS should expose the complete wander wiggle keyframes.");
+const keyframeTransforms = [
+  ...keyframesCss.matchAll(/transform:\s*([\s\S]*?);/g),
+].map((match) => match[1]);
+assert(
+  keyframeTransforms.length === 4,
+  "Every wander wiggle keyframe should define one transform.",
+);
+for (const transform of keyframeTransforms) {
+  const translateIndex = transform.indexOf("translate3d(");
+  const rotateIndex = transform.indexOf("rotate(");
+  const scaleIndex = transform.indexOf("scale(");
+  assert(
+    translateIndex >= 0 && translateIndex < rotateIndex && rotateIndex < scaleIndex,
+    `Wander wiggle transforms must compose translate3d -> rotate -> scale, received: ${transform}`,
+  );
+}
+const reducedMotionRule = css.match(
+  /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.street-view-breathing\s*\{([\s\S]*?)\}\s*\}/,
+)?.[1];
+assert(reducedMotionRule, "CSS should define a reduced-motion breathing rule.");
+assert(
+  /animation:\s*none\s*!important/.test(reducedMotionRule),
+  "Reduced motion should disable the breathing animation.",
+);
+assert(
+  /transform:\s*scale\(1\)\s*!important/.test(reducedMotionRule),
+  "Reduced motion should reset the breathing transform.",
+);
+assert(
+  /transition:\s*none\s*!important/.test(reducedMotionRule),
+  "Reduced motion should disable the inline transform transition.",
 );

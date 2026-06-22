@@ -103,7 +103,16 @@ No Places API key is needed or used.
 ## Behavior Notes
 
 - `/api/places` always serves local SQLite data.
-- When a review target is selected, the bot stops walking, pans toward the business, reads the review while stopped, then returns to its wander heading before moving again.
+- When a review target is selected, the bot stops walking and plays the entry
+  bleep before the camera moves. By default, it turns toward the business over
+  2.5 seconds with gentle easing, holds the aligned view for 950 ms, and then
+  reads the review while stopped. The CSS wobble pauses on its exact current
+  frame throughout `DELIVER` and resumes for the `RETURN` pan.
+  During speech, the original HUD presentation remains green Processing text
+  with a white pulsing text glyph. After speech, a two-second stopped hold keeps
+  the exact reading view on screen. The exit
+  bloop then starts immediately before the return pan begins and may overlap it;
+  walking resumes only after that pan completes.
 - `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
 - `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.
 - `/api/tts` reuses a persistent `scripts/piper-worker.py` process. The worker caches loaded voices, serializes synthesis requests, returns timing metadata, and restarts on a later request after exit. Worker failure falls back once to the one-shot Piper CLI. Successful responses include `Server-Timing` and `X-Piper-Model-Cache` headers.
@@ -135,8 +144,20 @@ No Places API key is needed or used.
 - Street View imagery/CDN throttling is separate from review lookup. The bot watches repeated 429/5xx imagery responses and temporarily slows wander steps; avoid per-frame `setPov` behavior.
 - Street View starts, teleports, nudges, and linked steps are filtered through `StreetViewService` in `src/engine/street-view-panorama-data.ts`. Coordinate searches use `StreetViewSource.OUTDOOR`, and candidate panos must have at least one outgoing link so the bot does not spawn in or step into non-walkable photospheres.
 - Maps imagery diagnostics are client-only. `src/lib/maps-cdn-stress.ts` observes Street View imagery failures, `Bot` publishes `MAPS` activity lines, and `StreetViewController.sampleCanvasBrightness()` best-effort samples the Street View canvas. These diagnostics must not add Street View API calls or per-frame camera updates.
-- The wandering camera wiggle is CSS-only in `VisualEffects`; it transforms the
-  rendered Street View layer locally and must not drive Google `setPov` updates.
+- The Street View layer has a continuous wobble in every bot state. During
+  `WANDER`, maximum positive offsets are approximately 69 px horizontal and
+  9 px vertical. Stopped, reading, `DETECT`, and `RETURN` states use about 14 px
+  horizontal and 5.5 px vertical with reduced rotation. Registered CSS
+  properties interpolate profile changes while the same eight-second irregular
+  cycle continues through camera turns. Reduced-motion
+  mode disables both the wobble and its transition. It transforms the rendered Street View layer
+  with CSS only: it must not drive per-frame Google `setPov` updates, use browser
+  timers, request extra imagery, add Google/Street View API or service calls or
+  other network traffic, or change local review polling cadence.
+- `ReviewStatsChip` is keyed by its displayed daily and lifetime totals. Each
+  successful totals update remounts a 900 ms, `aria-hidden` pastel sparkle and
+  clipped shimmer decoration without timers or changes to database refresh
+  behavior. Reduced motion disables both animations.
 
 ## Local Review Corpus
 
@@ -157,4 +178,9 @@ See `docs/local-review-database.md` for import formats and schema details.
 
 `npm run test:no-google-places` scans runtime source and `.env.example` for old Places API paths, env toggles, and pagination settings. Keep it green when changing review lookup behavior.
 
-`npm run test:street-view-css-wiggle` guards the local-only wandering wiggle so it stays subtle and does not call Google Street View POV APIs.
+`npm run test:street-view-css-wiggle` verifies the computed outputs from
+`getStreetViewEffectStyle`, including the approximately 69/9 px `WANDER` and
+14/5.5 px stopped/turning horizontal/vertical profiles, reduced rotations,
+continuous eight-second irregular cycle, typed profile transitions, and
+reduced-motion override. It also verifies that this style computation has no
+direct browser-timer, network, or Google Street View POV side effects.
