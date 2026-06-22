@@ -73,7 +73,13 @@ function run(command, args, label) {
   return result;
 }
 
-function analyzeLoudness(input, target) {
+function analyzeLoudness(input, target, preFilter = "") {
+  const filters = [
+    preFilter,
+    `loudnorm=I=${target}:TP=-2:LRA=20:print_format=json`,
+  ]
+    .filter(Boolean)
+    .join(",");
   const result = run(
     "ffmpeg",
     [
@@ -84,7 +90,7 @@ function analyzeLoudness(input, target) {
       "-map",
       "0:a:0",
       "-af",
-      `loudnorm=I=${target}:TP=-2:LRA=20:print_format=json`,
+      filters,
       "-f",
       "null",
       NULL_DEVICE,
@@ -96,10 +102,14 @@ function analyzeLoudness(input, target) {
   return JSON.parse(match.at(-1));
 }
 
-function loudnessFilter(input, target) {
-  const measured = analyzeLoudness(input, target);
-  return [
+function loudnessFilter(input, target, preFilter = "") {
+  const measured = analyzeLoudness(input, target, preFilter);
+  const filters = [
+    preFilter,
     `loudnorm=I=${target}`,
+  ].filter(Boolean);
+  filters[filters.length - 1] = [
+    filters[filters.length - 1],
     "TP=-2",
     "LRA=20",
     `measured_I=${measured.input_i}`,
@@ -110,6 +120,7 @@ function loudnessFilter(input, target) {
     "linear=true",
     "print_format=summary",
   ].join(":");
+  return filters.join(",");
 }
 
 function resetOutputFolder(folder) {
@@ -150,8 +161,20 @@ function convertBotRunning(file, output) {
   );
 }
 
-function convertPcm(file, output, targetLufs, label) {
-  const filter = loudnessFilter(file.path, targetLufs);
+function machineStepFilter() {
+  return [
+    "highpass=f=120",
+    "lowpass=f=7600",
+    "vibrato=f=3.7:d=0.075",
+    "acrusher=bits=11:samples=5:mix=0.42",
+    "aphaser=in_gain=0.7:out_gain=0.85:delay=2.8:decay=0.35:speed=0.45:type=t",
+    "acompressor=threshold=-18dB:ratio=2.2:attack=8:release=80",
+    "alimiter=limit=0.88",
+  ].join(",");
+}
+
+function convertPcm(file, output, targetLufs, label, preFilter = "") {
+  const filter = loudnessFilter(file.path, targetLufs, preFilter);
   run(
     "ffmpeg",
     [
@@ -203,7 +226,7 @@ function main() {
     "turning_loop",
     "UIData_Generic Robotics Medium Data Processing Constant 01_B00M_ONE.wav",
   );
-  const steps = uniqueFiles(audioFiles("steps"));
+  const steps = uniqueFiles(audioFiles("bot_stepping"));
   const oldAmbientOutput = join(OUTPUT, "ambient");
   const botRunningOutput = join(OUTPUT, "bot-running");
   const turningOutput = join(OUTPUT, "turning");
@@ -226,7 +249,13 @@ function main() {
   const footstepUrls = steps.map((file, index) => {
     const name = `step-${String(index + 1).padStart(2, "0")}.wav`;
     console.log(`step: ${file.name} -> ${name}`);
-    convertPcm(file, join(stepsOutput, name), STEP_TARGET_LUFS, "Footstep");
+    convertPcm(
+      file,
+      join(stepsOutput, name),
+      STEP_TARGET_LUFS,
+      "Footstep",
+      machineStepFilter(),
+    );
     return `/audio/steps/${name}`;
   });
 

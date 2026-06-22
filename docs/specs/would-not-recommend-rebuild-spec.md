@@ -403,7 +403,7 @@ When a review is selected:
 
 - set its in-memory hash read timestamp immediately
 - call `/api/places` again with `action: "markRead"`
-- use fixed live Piper voice index 2
+- use fixed live Piper voice index 1
 - prepare TTS before panning when possible
 - post a `REVIEW` activity message with metadata and the review text
 - transition to `DETECT`
@@ -558,7 +558,7 @@ Default live voice:
 
 | Index | Model |
 | ---: | --- |
-| 2 | `vendor/piper-voices/en_US-ryan-medium.onnx` |
+| 1 | `vendor/piper-voices/en_US-amy-medium.onnx` |
 
 Supported Piper models:
 
@@ -593,7 +593,7 @@ Accept `POST` JSON:
 {
   "text": "string",
   "engine": "piper",
-  "piperVoiceIndex": 2,
+  "piperVoiceIndex": 1,
   "piperLengthScale": 1,
   "kokoroVoice": "af_heart",
   "kokoroSpeed": 1
@@ -612,7 +612,7 @@ Requirements:
 - For Piper:
   - default engine
   - clamp length scale to 0.5-2 if provided
-  - use requested valid voice index or default index 2
+  - use requested valid voice index or default index 1
   - run local Piper executable/module with selected ONNX model
 - For Kokoro:
   - optional lab engine

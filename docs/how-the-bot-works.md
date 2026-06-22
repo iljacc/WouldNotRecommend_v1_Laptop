@@ -59,9 +59,11 @@ The query is throttled by `queryDistanceThreshold` and `queryMinInterval`, so th
 `GET /api/places` reads nearby businesses from SQLite tables in `data/db/would-not-recommend.db`. `POST /api/places` reads review rows for a selected local place and can mark the selected review as read.
 
 The live bot always uses the configured Piper voice in `src/lib/piper-config.ts`.
-It is currently pinned to `en_US-ryan-medium`, a male voice, for every review
-readout. `/tts-lab` can still audition alternate voices without changing the
-live kiosk behavior. Run `npm run setup:piper` on a new laptop to install
+It is currently pinned to `en_US-amy-medium` (index `1`) with length scale `1.0`
+for every review readout. The main bot holds 900 ms before voice playback, uses
+0 ms subtitle lead/lag, and lingers subtitles for 3500 ms after speech. `/tts-lab`
+can still audition alternate voices without changing the live kiosk behavior.
+Run `npm run setup:piper` on a new laptop to install
 `.venv-piper` and download the configured model into `vendor/piper-voices/`.
 `/api/tts` starts one persistent `scripts/piper-worker.py` process and keeps
 loaded voices in memory, so normal reviews avoid Python and ONNX model startup.
@@ -145,7 +147,8 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | Bot-running loop | Continuous | One recording loops for the session, with smooth gain ramps between searching, processing, TTS ducking, and teleport recovery |
 | Mechanical turn base rate | `0.96..1.04` | Randomized playback rate chosen for each review-facing and road-return turn before its restrained rise and fall |
 | `AMBIENT_RECOVERY_FADE_MIN_MS` | 1,000 ms | Minimum bot-running loop fade for fast imagery-recovery teleports |
-| `FOOTSTEP_RATE_VARIATION` | 0.025 | Maximum playback-rate change around the original step pair |
+| Footstep source | 6 samples | One processed `audio/bot_stepping/` sample is shuffled per successful Street View move |
+| `FOOTSTEP_RATE_VARIATION` | 0.025 | Maximum playback-rate change around the processed step sample |
 | `FOOTSTEP_GAIN_VARIATION_DB` | 1.5 dB | Maximum randomized footstep gain change |
 
 ## Operational Notes

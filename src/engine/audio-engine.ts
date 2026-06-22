@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AMBIENT_AUDIO_URL,
   BOT_RUNNING_AUDIO_URL,
   FOOTSTEP_AUDIO_URLS,
   TURNING_AUDIO_URL,
@@ -21,6 +22,7 @@ type RunningLoop = {
   element: HTMLAudioElement;
   gain: GainNode;
   source: MediaElementAudioSourceNode;
+  targetGain: number;
 };
 
 type ActiveTurnPlayback = {
@@ -35,7 +37,8 @@ export class AudioEngine {
   private ttsGain: GainNode | null = null;
   private ambientBusGain: GainNode | null = null;
   private footstepsGain: GainNode | null = null;
-  private runningLoop: RunningLoop | null = null;
+  private ambientLoop: RunningLoop | null = null;
+  private botRunningLoop: RunningLoop | null = null;
   private turningBuffer: AudioBuffer | null = null;
   private activeTurnPlayback: ActiveTurnPlayback | null = null;
   private bleepBuffer: AudioBuffer | null = null;
@@ -77,7 +80,8 @@ export class AudioEngine {
     this.footstepsGain.gain.value = AUDIO.FOOTSTEP_VOLUME;
     this.footstepsGain.connect(this.masterGain);
 
-    this.runningLoop = this.createRunningLoop();
+    this.ambientLoop = this.createLoop(AMBIENT_AUDIO_URL, 1);
+    this.botRunningLoop = this.createLoop(BOT_RUNNING_AUDIO_URL, 0.65);
     this.bleepBuffer = this.generateTone(660, 0.3, "ascending");
     this.bloopBuffer = this.generateTone(440, 0.3, "descending");
     await Promise.all([this.loadFootsteps(), this.loadTurningBuffer()]);
@@ -144,18 +148,9 @@ export class AudioEngine {
   }
 
   startAmbient(): void {
-    const loop = this.runningLoop;
-    if (!this.ctx || !loop) return;
-    loop.element.currentTime = 0;
-    void loop.element.play().catch((error) => {
-      console.warn("Bot-running loop could not start.", error);
-    });
-    this.rampGain(
-      loop.gain,
-      1,
-      this.ctx.currentTime,
-      AUDIO.AMBIENT_CROSSFADE_MS / 1_000,
-    );
+    if (!this.ctx) return;
+    this.startLoop(this.ambientLoop, "Ambient loop");
+    this.startLoop(this.botRunningLoop, "Bot-running loop");
   }
 
   crossfadeTo(layer: AmbientLayer): void {
@@ -241,8 +236,8 @@ export class AudioEngine {
     source.playbackRate.linearRampToValueAtTime(plan.endRate, end);
 
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(AUDIO.SFX_VOLUME, attackEnd);
-    gain.gain.setValueAtTime(AUDIO.SFX_VOLUME, releaseStart);
+    gain.gain.linearRampToValueAtTime(AUDIO.TURNING_VOLUME, attackEnd);
+    gain.gain.setValueAtTime(AUDIO.TURNING_VOLUME, releaseStart);
     gain.gain.linearRampToValueAtTime(0, end);
 
     source.connect(gain);
@@ -265,27 +260,20 @@ export class AudioEngine {
 
   beginTeleportAmbient(fadeOutMs: number): void {
     this.stopActiveTurn();
-    if (!this.ctx || !this.runningLoop) return;
-    this.rampGain(
-      this.runningLoop.gain,
-      0,
-      this.ctx.currentTime,
-      this.ambientFadeSeconds(fadeOutMs),
-    );
+    if (!this.ctx) return;
+    this.fadeLoop(this.ambientLoop, 0, fadeOutMs);
+    this.fadeLoop(this.botRunningLoop, 0, fadeOutMs);
   }
 
   completeTeleportAmbient(_changed: boolean, fadeInMs: number): void {
-    if (!this.ctx || !this.runningLoop) return;
-    if (this.runningLoop.element.paused) {
-      void this.runningLoop.element.play().catch((error) => {
-        console.warn("Bot-running loop could not resume after teleport.", error);
-      });
-    }
-    this.rampGain(
-      this.runningLoop.gain,
-      1,
-      this.ctx.currentTime,
-      this.ambientFadeSeconds(fadeInMs),
+    if (!this.ctx) return;
+    this.resumeLoop(this.ambientLoop, "Ambient loop");
+    this.resumeLoop(this.botRunningLoop, "Bot-running loop");
+    this.fadeLoop(this.ambientLoop, this.ambientLoop?.targetGain ?? 0, fadeInMs);
+    this.fadeLoop(
+      this.botRunningLoop,
+      this.botRunningLoop?.targetGain ?? 0,
+      fadeInMs,
     );
   }
 
@@ -316,13 +304,8 @@ export class AudioEngine {
   destroy(): void {
     this.stopTtsPlayback();
     this.stopActiveTurn(0);
-    if (this.runningLoop) {
-      this.runningLoop.element.pause();
-      this.runningLoop.element.removeAttribute("src");
-      this.runningLoop.element.load();
-      this.runningLoop.source.disconnect();
-      this.runningLoop.gain.disconnect();
-    }
+    this.destroyLoop(this.ambientLoop);
+    this.destroyLoop(this.botRunningLoop);
     for (const source of this.activeBufferSources) {
       try {
         source.stop();
@@ -333,17 +316,18 @@ export class AudioEngine {
     }
     this.activeBufferSources.clear();
     void this.ctx?.close();
-    this.runningLoop = null;
+    this.ambientLoop = null;
+    this.botRunningLoop = null;
     this.turningBuffer = null;
     this.ctx = null;
     this.initialized = false;
   }
 
-  private createRunningLoop(): RunningLoop {
+  private createLoop(url: string, targetGain: number): RunningLoop {
     if (!this.ctx || !this.ambientBusGain) {
       throw new Error("AudioContext not initialized");
     }
-    const element = new Audio(BOT_RUNNING_AUDIO_URL);
+    const element = new Audio(url);
     element.preload = "auto";
     element.loop = true;
     const gain = this.ctx.createGain();
@@ -351,7 +335,51 @@ export class AudioEngine {
     const source = this.ctx.createMediaElementSource(element);
     source.connect(gain);
     gain.connect(this.ambientBusGain);
-    return { element, gain, source };
+    return { element, gain, source, targetGain };
+  }
+
+  private startLoop(loop: RunningLoop | null, label: string): void {
+    if (!this.ctx || !loop) return;
+    loop.element.currentTime = 0;
+    void loop.element.play().catch((error) => {
+      console.warn(`${label} could not start.`, error);
+    });
+    this.rampGain(
+      loop.gain,
+      loop.targetGain,
+      this.ctx.currentTime,
+      AUDIO.AMBIENT_CROSSFADE_MS / 1_000,
+    );
+  }
+
+  private resumeLoop(loop: RunningLoop | null, label: string): void {
+    if (!loop || !loop.element.paused) return;
+    void loop.element.play().catch((error) => {
+      console.warn(`${label} could not resume after teleport.`, error);
+    });
+  }
+
+  private fadeLoop(
+    loop: RunningLoop | null,
+    target: number,
+    durationMs: number,
+  ): void {
+    if (!this.ctx || !loop) return;
+    this.rampGain(
+      loop.gain,
+      target,
+      this.ctx.currentTime,
+      this.ambientFadeSeconds(durationMs),
+    );
+  }
+
+  private destroyLoop(loop: RunningLoop | null): void {
+    if (!loop) return;
+    loop.element.pause();
+    loop.element.removeAttribute("src");
+    loop.element.load();
+    loop.source.disconnect();
+    loop.gain.disconnect();
   }
 
   private async loadFootsteps(): Promise<void> {

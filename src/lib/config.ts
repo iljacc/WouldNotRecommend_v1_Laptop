@@ -62,6 +62,14 @@ export const SUBTITLE_TIMING = {
   FADE_OUT_MS: 1_200,
 } as const;
 
+/** Live `/bot` speech defaults, matching the current Piper audition settings. */
+export const TTS = {
+  ENGINE: "piper",
+  PIPER_LENGTH_SCALE: 1,
+  PRE_READ_HOLD_MS: 900,
+  SUBTITLE_LEAD_LAG_MS: 0,
+} as const;
+
 /** Den Haag crawl bounds: ~700 m around 52.078102, 4.314051. */
 export const HAGUE_REGION = {
   minLat: 52.071814,
@@ -149,9 +157,10 @@ export const AUDIO = {
   AMBIENT_DELIVER_VOLUME: 0.1,
   AMBIENT_CROSSFADE_MS: 8_000,
   AMBIENT_RECOVERY_FADE_MIN_MS: 1_000,
-  FOOTSTEP_VOLUME: 0.5,
+  FOOTSTEP_VOLUME: 0.25,
   FOOTSTEP_RATE_VARIATION: 0.025,
   FOOTSTEP_GAIN_VARIATION_DB: 1.5,
+  TURNING_VOLUME: 0.25,
   SFX_VOLUME: 0.5,
   /** Gain for Piper (and other buffered speech) before the master. */
   TTS_VOLUME: 0.2,

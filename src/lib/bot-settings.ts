@@ -4,6 +4,7 @@ import {
   REVIEWS,
   STREET_VIEW,
   TIMING,
+  TTS,
 } from "@/lib/config";
 import { computeBBoxFromPath, isLatLngInPolygon } from "@/lib/wander-geo";
 import type { LatLng } from "@/lib/types";
@@ -76,11 +77,19 @@ export interface BotStreetViewSettings {
   wanderLookDrift: number;
 }
 
+export interface BotTtsSettings {
+  engine: "piper";
+  piperLengthScale: number;
+  preReadHoldMs: number;
+  subtitleLeadLagMs: number;
+}
+
 export interface BotSettings {
   timing: BotTimingSettings;
   places: BotPlacesSettings;
   reviews: BotReviewsSettings;
   streetView: BotStreetViewSettings;
+  tts: BotTtsSettings;
   wanderRegion: WanderRegion;
   customSpawnPoints: CustomSpawnPoint[];
   reviewSelectionMode: ReviewSelectionMode;
@@ -142,6 +151,15 @@ function defaultStreetView(): BotStreetViewSettings {
   };
 }
 
+function defaultTts(): BotTtsSettings {
+  return {
+    engine: TTS.ENGINE,
+    piperLengthScale: TTS.PIPER_LENGTH_SCALE,
+    preReadHoldMs: TTS.PRE_READ_HOLD_MS,
+    subtitleLeadLagMs: TTS.SUBTITLE_LEAD_LAG_MS,
+  };
+}
+
 function defaultWanderRegion(): WanderRegion {
   return {
     minLat: HAGUE_REGION.minLat,
@@ -157,6 +175,7 @@ export function createDefaultBotSettings(): BotSettings {
     places: defaultPlaces(),
     reviews: defaultReviews(),
     streetView: defaultStreetView(),
+    tts: defaultTts(),
     wanderRegion: defaultWanderRegion(),
     customSpawnPoints: [],
     reviewSelectionMode: "random",

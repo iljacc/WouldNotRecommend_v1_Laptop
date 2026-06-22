@@ -15,7 +15,7 @@ export const PIPER_VOICE_MODEL_FILES = [
   "en_US-libritts_r-medium.onnx",
 ] as const;
 
-export const PIPER_VOICE_INDEX = 2;
+export const PIPER_VOICE_INDEX = 1;
 /** Silence inserted between Piper sentence chunks; affects playback, not inference. */
 export const PIPER_SENTENCE_SILENCE_MS = 300;
 

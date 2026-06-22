@@ -741,9 +741,10 @@ export class Bot {
             targetBusiness,
             reviewToRead,
           };
+          const { tts } = getBotSettings();
           this.tts.prepare(reviewToRead.text, {
             piperVoiceIndex,
-            piperLengthScale: 1,
+            piperLengthScale: tts.piperLengthScale,
             ttsContext: {
               placeId: targetBusiness.placeId,
               reviewId: reviewToRead.reviewId,
@@ -773,10 +774,17 @@ export class Bot {
     }
     this.ttsStartedAt = Date.now();
     this.onSubtitleChange?.({ fullText: text, revealed: 0 });
+    const { tts } = getBotSettings();
+    if (tts.preReadHoldMs > 0) {
+      await this.sleep(tts.preReadHoldMs);
+      if (!this.running || this.context.state !== BotState.DELIVER) {
+        return;
+      }
+    }
     try {
       await this.tts.speak(text, {
         piperVoiceIndex,
-        piperLengthScale: 1,
+        piperLengthScale: tts.piperLengthScale,
         ttsContext: {
           placeId: this.context.targetBusiness?.placeId,
           reviewId: this.context.reviewToRead?.reviewId,

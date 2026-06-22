@@ -42,9 +42,12 @@ script expects these exact local files:
 ```txt
 audio/bot_running/UIData_Generic Robotics Medium Data Processing Constant 01_B00M_ONE_2.wav
 audio/turning_loop/UIData_Generic Robotics Medium Data Processing Constant 01_B00M_ONE.wav
+audio/bot_stepping/*.wav
 ```
 
 With FFmpeg and FFprobe on `PATH`, regenerate them with `npm run audio:prepare`.
+The step samples are processed during preparation into a woozy digital machine
+texture before being written to `public/audio/steps/`.
 The raw `audio/` directory remains intentionally untracked.
 
 ## Piper Voice
@@ -55,7 +58,7 @@ The live bot uses the fixed voice configured in:
 src/lib/piper-config.ts
 ```
 
-`npm run setup:piper` reads `PIPER_VOICE_INDEX`, downloads the matching Piper ONNX model and JSON metadata into `vendor/piper-voices/`, and installs the local `.venv-piper` runtime. The current live voice is index `2`, `en_US-ryan-medium`.
+`npm run setup:piper` reads `PIPER_VOICE_INDEX`, downloads the matching Piper ONNX model and JSON metadata into `vendor/piper-voices/`, and installs the local `.venv-piper` runtime. The current live voice is index `1`, `en_US-amy-medium`.
 
 ## Run
 

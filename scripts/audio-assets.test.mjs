@@ -4,10 +4,13 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const manifestPath = join(root, "src", "lib", "audio-assets.ts");
+const prepareScriptPath = join(root, "scripts", "prepare-audio-assets.cjs");
 
 assert.ok(existsSync(manifestPath), "audio asset manifest should exist");
+assert.ok(existsSync(prepareScriptPath), "audio preparation script should exist");
 
 const manifest = readFileSync(manifestPath, "utf8");
+const prepareScript = readFileSync(prepareScriptPath, "utf8");
 
 function urlsFor(exportName) {
   const match = manifest.match(
@@ -29,7 +32,17 @@ const botRunningUrl = urlFor("BOT_RUNNING_AUDIO_URL");
 const turningUrl = urlFor("TURNING_AUDIO_URL");
 const footstepUrls = urlsFor("FOOTSTEP_AUDIO_URLS");
 
-assert.equal(footstepUrls.length, 12, "manifest should contain twelve step pairs");
+assert.equal(footstepUrls.length, 6, "manifest should contain six bot step samples");
+assert.match(
+  prepareScript,
+  /audioFiles\("bot_stepping"\)/,
+  "audio prep should source bot step samples from audio/bot_stepping",
+);
+assert.match(
+  prepareScript,
+  /machineStepFilter/,
+  "audio prep should apply the mechanical step processing chain",
+);
 
 for (const url of [botRunningUrl, turningUrl, ...footstepUrls]) {
   assert.ok(!url.includes(" "), `URL should not contain spaces: ${url}`);
