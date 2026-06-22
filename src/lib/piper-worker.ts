@@ -7,6 +7,7 @@ export type PiperWorkerSynthesisRequest = {
   modelPath: string;
   outputPath: string;
   lengthScale: number | null;
+  sentenceSilenceMs: number;
 };
 
 export type PiperWorkerSynthesisResult = {
@@ -14,6 +15,8 @@ export type PiperWorkerSynthesisResult = {
   modelCacheHit: boolean;
   modelLoadMs: number;
   synthesisMs: number;
+  sentenceCount: number;
+  insertedSilenceMs: number;
   totalMs: number;
 };
 
@@ -151,6 +154,8 @@ export class PiperWorkerClient {
       modelCacheHit: response.modelCacheHit,
       modelLoadMs: response.modelLoadMs,
       synthesisMs: response.synthesisMs,
+      sentenceCount: response.sentenceCount,
+      insertedSilenceMs: response.insertedSilenceMs,
       totalMs: response.totalMs,
     });
   }

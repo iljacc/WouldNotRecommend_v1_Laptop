@@ -2,7 +2,7 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-set "PS_SCRIPT=%SCRIPT_DIR%setup-windows-kiosk.ps1"
+set "PS_SCRIPT=%SCRIPT_DIR%configure-installation-windows.ps1"
 
 if not exist "%PS_SCRIPT%" (
   echo Could not find "%PS_SCRIPT%".
@@ -17,7 +17,7 @@ if %errorlevel% neq 0 (
   exit /b
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -Apply
 echo.
 echo Done. Read the summary above, then restart Chrome before the exhibition run.
 pause

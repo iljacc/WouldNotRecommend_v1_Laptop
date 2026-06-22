@@ -35,12 +35,14 @@ describe("PiperWorkerClient", () => {
         modelPath,
         outputPath: path.join(tempDir, "first.wav"),
         lengthScale: 1,
+        sentenceSilenceMs: 300,
       }),
       client.synthesize({
         text: "Second persistent client request.",
         modelPath,
         outputPath: path.join(tempDir, "second.wav"),
         lengthScale: 1,
+        sentenceSilenceMs: 300,
       }),
     ]);
 

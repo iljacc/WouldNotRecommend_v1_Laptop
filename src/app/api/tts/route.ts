@@ -5,6 +5,7 @@ import path from "path";
 
 import {
   getPiperModelPath,
+  PIPER_SENTENCE_SILENCE_MS,
   PIPER_VOICE_INDEX,
   PIPER_VOICE_MODEL_FILES,
 } from "@/lib/piper-config";
@@ -268,6 +269,10 @@ export async function POST(request: Request): Promise<Response> {
         ? Math.min(2, Math.max(0.5, body.piperLengthScale))
         : null;
     const speedArgs = piperLengthScale === null ? [] : ["--length_scale", String(piperLengthScale)];
+    const sentenceSilenceArgs = [
+      "--sentence_silence",
+      String(PIPER_SENTENCE_SILENCE_MS / 1000),
+    ];
 
     const sanitized = sanitizePiperText(text);
     if (!sanitized.text.length) {
@@ -307,6 +312,7 @@ export async function POST(request: Request): Promise<Response> {
           modelPath,
           outputPath: outPath,
           lengthScale: piperLengthScale,
+          sentenceSilenceMs: PIPER_SENTENCE_SILENCE_MS,
         });
         code = 0;
       } catch (error) {
@@ -326,6 +332,7 @@ export async function POST(request: Request): Promise<Response> {
           "-m",
           modelPath,
           ...speedArgs,
+          ...sentenceSilenceArgs,
           "--output_file",
           outPath,
         ],

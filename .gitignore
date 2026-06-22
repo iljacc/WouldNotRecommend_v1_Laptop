@@ -21,6 +21,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .codex/
+.superpowers/
+
+# Local source recordings; processed runtime assets live in public/audio.
+/audio/
 
 # Piper TTS temp WAVs (api/tts)
 .tmp/

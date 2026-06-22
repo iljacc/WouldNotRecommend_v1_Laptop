@@ -25,6 +25,7 @@ The app does not scrape Google Maps pages and does not call Google Places APIs. 
 npm install
 cp .env.example .env.local
 npm run setup:piper
+npm run audio:prepare
 npm run dev
 npm run typecheck
 npm run lint
@@ -55,6 +56,7 @@ For a second gallery laptop, use `docs/installation-laptop.md`.
 | `GSV_KIOSK_URLS` | Optional comma-separated launcher paths; defaults to `/bot,/terminal` |
 | `GSV_KIOSK_MODE` | Launcher window mode: `app` or `kiosk`; multiple windows default to `app` |
 | `GSV_KIOSK_BOUNDS` | Optional semicolon-separated `x,y,width,height` window placement |
+| `GSV_KIOSK_PATH` | Optional explicit Chrome/Edge/Chromium executable; Windows otherwise prefers Chrome |
 
 No Places API key is needed or used.
 
@@ -94,11 +96,14 @@ No Places API key is needed or used.
 | `src/engine/review-manager.ts` | Local candidate cache, review filtering, repeat suppression |
 | `src/engine/street-view-controller.ts` | Street View panorama wrapper and movement/camera behavior |
 | `src/engine/state-machine.ts` | Bot state transitions |
+| `src/engine/audio-engine.ts` | Streaming ambience, speech ducking, footsteps, and shared Web Audio routing |
+| `src/engine/audio-shuffle.ts` | Pure shuffle-bag and audio variation helpers |
 | `src/lib/db.ts` | SQLite schema, local corpus lookup, read history |
 | `src/lib/config.ts` | Default timing, region, local review query, review, and Street View settings |
 | `src/lib/bot-settings.ts` | Settings adapter over defaults |
 | `docs/local-review-database.md` | Supported local review schemas and import notes |
 | `docs/how-the-bot-works.md` | Plain-English behavior description |
+| `scripts/prepare-audio-assets.cjs` | FFmpeg conversion from source masters to browser assets |
 
 ## Behavior Notes
 
@@ -113,9 +118,13 @@ No Places API key is needed or used.
   the exact reading view on screen. The exit
   bloop then starts immediately before the return pan begins and may overlap it;
   walking resumes only after that pan completes.
+- City ambience comes from seven unique masters in `audio/ambient/`. `npm run audio:prepare` deduplicates and level-matches them into 48 kHz Opus files under `public/audio/ambient/`, converts the twelve `audio/steps/` pairs to 48 kHz WAV, and regenerates `src/lib/audio-assets.ts`. FFmpeg and FFprobe must be available on `PATH` when regenerating assets.
+- `AudioEngine` streams ambience through two Web Audio-connected media decks. Tracks use an eight-second natural crossfade and a no-immediate-repeat shuffle. Successful teleports advance to a new recording; failed teleports restore the current one. Review speech ducks but does not mute the field recording.
+- `StreetViewController.onSuccessfulStep` is the sole footstep trigger. Each successful panorama move plays one complete two-foot clip from the combined asphalt/tile shuffle pool with restrained pitch and gain variation.
 - `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
 - `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.
 - `/api/tts` reuses a persistent `scripts/piper-worker.py` process. The worker caches loaded voices, serializes synthesis requests, returns timing metadata, and restarts on a later request after exit. Worker failure falls back once to the one-shot Piper CLI. Successful responses include `Server-Timing` and `X-Piper-Model-Cache` headers.
+- Piper inserts `PIPER_SENTENCE_SILENCE_MS` (currently 300 ms) of zero-valued PCM between sentence chunks. This changes playback phrasing only; it does not add inference work or alter subtitles.
 - `/api/tts` sanitizes only the Piper-bound copy by normalizing Unicode and removing unsafe hidden control characters plus surrogate code units; subtitles keep the original review text. On synthesis failure, check the server console for full Piper stderr plus place/review context.
 - `ReviewManager` queries local nearby candidates after enough time and movement have passed.
 - Local nearby lookup is nearest-neighbor, capped by `PLACES.LOCAL_CORPUS_NEAREST_PLACE_LIMIT`.
@@ -123,10 +132,19 @@ No Places API key is needed or used.
 - City tour is opt-in. Leave `NEXT_PUBLIC_CITY_TOUR=false` or unset for the fixed The Hague installation behavior. Set it to `true` only when deliberately testing the curated multi-city rotation in `data/city-tour.json`.
 - Exact review repeat history is tracked in memory and persisted in corpus rows when supported. In-memory session history is timestamped: the current `/bot` tab avoids the same review hash for `sessionReviewRepeatCooldownMinutes` (default 30), then may reuse it if needed for cadence.
 - `/terminal` is same-browser, same-origin only; it is not a persisted multi-device feed.
-- `npm start` uses `scripts/start-with-kiosk.cjs` to launch production
+- `npm run start:kiosk` (or compatible `npm start`) uses
+  `scripts/start-with-kiosk.cjs` to launch production
   presentation windows after the server is ready. On Windows it defaults to
   `/bot` plus `/terminal` using one shared browser profile so `BroadcastChannel`
-  still works across the two displays.
+  still works across the two displays. It prefers Chrome, uses the clean
+  `.tmp/kiosk-browser` profile, maps `/bot` to the primary 4K display and
+  `/terminal` to the non-primary 1080p display, and logs recovery activity to
+  `.tmp/kiosk-logs/launcher.log`. `GSV_KIOSK_BOUNDS` overrides detection.
+- `scripts/configure-installation-windows.ps1` provides non-mutating `-Report`
+  and `-WhatIf` modes plus elevated, backed-up `-Apply` and `-Restore` modes for
+  installation power, lid, notification, screen saver, and Chrome GPU settings.
+  It deliberately leaves Windows Update pause, display scaling, TV menus,
+  Lenovo Vantage, audio selection, and physical cooling as manual checks.
 - `/monitor` persists the same activity stream to SQLite in `bot_events`, then
   summarizes long runs for review droughts, event silence, stalled non-wander
   states, boundary recovery, frequent teleports, `/bot` runtime
