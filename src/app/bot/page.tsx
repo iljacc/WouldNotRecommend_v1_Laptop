@@ -74,6 +74,7 @@ export default function BotPage() {
         city={uiState.city}
         reviewsToday={reviewsToday}
         lifetimeReviewsTotal={lifetimeReviewsTotal}
+        reviewCount={uiState.reviewCount}
         sessionStartTime={uiState.sessionStartTime}
         subtitle={subtitle}
         cityTourSegmentEndTime={uiState.cityTourSegmentEndTime}

@@ -13,8 +13,12 @@ const globalCss = readFileSync(
   join(process.cwd(), "src/app/globals.css"),
   "utf8",
 );
+const hudSource = readFileSync(
+  join(process.cwd(), "src/components/HUD.tsx"),
+  "utf8",
+);
 
-function renderHud(state: BotState) {
+function renderHud(state: BotState, reviewCount = 0) {
   return renderToStaticMarkup(
     createElement(HUD, {
       mode: stateToMode(state),
@@ -23,6 +27,7 @@ function renderHud(state: BotState) {
       city: "The Hague",
       reviewsToday: 0,
       lifetimeReviewsTotal: 0,
+      reviewCount,
       sessionStartTime: 0,
       subtitle: null,
       cityTourSegmentEndTime: 0,
@@ -103,5 +108,28 @@ describe("rainbow processing indicator", () => {
     expect(markup).toContain("text-violet-400");
     expect(markup).not.toContain("text-current");
     expect(markup).not.toContain("processing-rainbow-cycle");
+  });
+});
+
+describe("review counter celebration", () => {
+  test("HUD re-keys the counter from the immediate session review count", () => {
+    expect(hudSource).toMatch(/key=\{`review-stats-\$\{reviewCount\}`\}/);
+    expect(hudSource).toMatch(/celebrate=\{reviewCount > 0\}/);
+  });
+
+  test("first increment renders six accessible-hidden sparkles and a shimmer", () => {
+    const initialMarkup = renderHud(BotState.WANDER, 0);
+    const incrementMarkup = renderHud(BotState.RETURN, 1);
+
+    expect(initialMarkup).not.toContain("review-counter-celebration");
+    expect(incrementMarkup).toContain('class="review-counter-celebration"');
+    expect(incrementMarkup.match(/data-review-sparkle="true"/g)).toHaveLength(6);
+    expect(incrementMarkup).toMatch(/aria-hidden="true"[\s\S]*?review-counter-shimmer-clip[\s\S]*?review-counter-shimmer/);
+  });
+
+  test("sparkles and shimmer run for 900ms and respect reduced motion", () => {
+    expect(globalCss).toMatch(/\.review-counter-sparkle\s*\{[\s\S]*?animation:\s*review-counter-sparkle 900ms/);
+    expect(globalCss).toMatch(/\.review-counter-shimmer\s*\{[\s\S]*?animation:\s*review-counter-shimmer 900ms/);
+    expect(globalCss).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.review-counter-sparkle,[\s\S]*?\.review-counter-shimmer\s*\{[\s\S]*?animation:\s*none !important/);
   });
 });

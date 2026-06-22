@@ -23,6 +23,7 @@ interface Props {
   city: string;
   reviewsToday: number | null;
   lifetimeReviewsTotal: number | null;
+  reviewCount: number;
   sessionStartTime: number;
   subtitle: TtsSubtitlePayload | null;
   cityTourSegmentEndTime: number;
@@ -38,6 +39,7 @@ export function HUD({
   city,
   reviewsToday,
   lifetimeReviewsTotal,
+  reviewCount,
   sessionStartTime,
   subtitle,
   cityTourSegmentEndTime,
@@ -49,8 +51,10 @@ export function HUD({
     <div className="pointer-events-none absolute inset-0 z-[38] font-mono">
       <div className="absolute top-6 left-6 sm:top-8 sm:left-8">
         <ReviewStatsChip
+          key={`review-stats-${reviewCount}`}
           reviewsToday={reviewsToday}
           lifetimeTotal={lifetimeReviewsTotal}
+          celebrate={reviewCount > 0}
         />
       </div>
 

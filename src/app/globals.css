@@ -119,6 +119,64 @@ a[href*="google.com/maps"] {
   animation: processing-rainbow-cycle 1s linear infinite;
 }
 
+@keyframes review-counter-sparkle {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2) rotate(45deg); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--sparkle-x)), calc(-50% + var(--sparkle-y))) scale(1.15) rotate(135deg); }
+}
+
+@keyframes review-counter-shimmer {
+  0% { opacity: 0; transform: translateX(-260%) skewX(-18deg); }
+  25% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateX(420%) skewX(-18deg); }
+}
+
+.review-counter-celebration {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.review-counter-sparkle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  color: #fde68a;
+  background: currentColor;
+  box-shadow: 0 0 7px currentColor;
+  opacity: 0;
+  animation: review-counter-sparkle 900ms ease-out both;
+}
+
+.review-counter-sparkle:nth-child(1) { --sparkle-x: -24px; --sparkle-y: -18px; color: #fde68a; }
+.review-counter-sparkle:nth-child(2) { --sparkle-x: 2px; --sparkle-y: -25px; color: #f9a8d4; animation-delay: 50ms; }
+.review-counter-sparkle:nth-child(3) { --sparkle-x: 28px; --sparkle-y: -15px; color: #c4b5fd; animation-delay: 100ms; }
+.review-counter-sparkle:nth-child(4) { --sparkle-x: 30px; --sparkle-y: 15px; color: #93c5fd; animation-delay: 40ms; }
+.review-counter-sparkle:nth-child(5) { --sparkle-x: -2px; --sparkle-y: 24px; color: #86efac; animation-delay: 90ms; }
+.review-counter-sparkle:nth-child(6) { --sparkle-x: -28px; --sparkle-y: 13px; color: #fdba74; animation-delay: 130ms; }
+
+.review-counter-shimmer-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 0.375rem;
+}
+
+.review-counter-shimmer {
+  position: absolute;
+  top: -50%;
+  left: 0;
+  width: 32%;
+  height: 200%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  opacity: 0;
+  animation: review-counter-shimmer 900ms ease-out both;
+}
+
 /* Local-only Street View drift; avoids per-frame Google `setPov` tile churn. */
 @keyframes wander-look-float {
   0%,
@@ -161,5 +219,10 @@ a[href*="google.com/maps"] {
     animation: none !important;
     transform: scale(1) !important;
     transition: none !important;
+  }
+
+  .review-counter-sparkle,
+  .review-counter-shimmer {
+    animation: none !important;
   }
 }
