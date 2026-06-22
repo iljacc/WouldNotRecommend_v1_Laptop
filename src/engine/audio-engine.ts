@@ -1,19 +1,22 @@
 "use client";
 
-import { AMBIENT_AUDIO_URLS, FOOTSTEP_AUDIO_URLS } from "@/lib/audio-assets";
+import {
+  BOT_RUNNING_AUDIO_URL,
+  FOOTSTEP_AUDIO_URLS,
+  TURNING_AUDIO_URL,
+} from "@/lib/audio-assets";
 import { getBotSettings } from "@/lib/bot-settings";
 import { AUDIO } from "@/lib/config";
 import type { AmbientLayer } from "@/lib/types";
 import { ShuffleBag, decibelsToGain, randomBetween } from "./audio-shuffle";
+import { createTurnPlaybackPlan } from "./turn-audio";
 
 type ToneDirection = "ascending" | "descending";
-type Timer = ReturnType<typeof setTimeout>;
 
-type AmbientDeck = {
+type RunningLoop = {
   element: HTMLAudioElement;
   gain: GainNode;
   source: MediaElementAudioSourceNode;
-  url: string | null;
 };
 
 export class AudioEngine {
@@ -22,14 +25,8 @@ export class AudioEngine {
   private ttsGain: GainNode | null = null;
   private ambientBusGain: GainNode | null = null;
   private footstepsGain: GainNode | null = null;
-  private ambientDecks: AmbientDeck[] = [];
-  private ambientBag = new ShuffleBag<string>(AMBIENT_AUDIO_URLS);
-  private failedAmbientUrls = new Set<string>();
-  private activeDeckIndex = 0;
-  private ambientTransitionTimer: Timer | null = null;
-  private ambientTransitionGeneration = 0;
-  private ambientTransitioning = false;
-  private teleportAmbientTransition = false;
+  private runningLoop: RunningLoop | null = null;
+  private turningBuffer: AudioBuffer | null = null;
   private bleepBuffer: AudioBuffer | null = null;
   private bloopBuffer: AudioBuffer | null = null;
   private footstepBuffers: AudioBuffer[] = [];
@@ -69,10 +66,10 @@ export class AudioEngine {
     this.footstepsGain.gain.value = AUDIO.FOOTSTEP_VOLUME;
     this.footstepsGain.connect(this.masterGain);
 
-    this.ambientDecks = [this.createAmbientDeck(0), this.createAmbientDeck(1)];
+    this.runningLoop = this.createRunningLoop();
     this.bleepBuffer = this.generateTone(660, 0.3, "ascending");
     this.bloopBuffer = this.generateTone(440, 0.3, "descending");
-    await this.loadFootsteps();
+    await Promise.all([this.loadFootsteps(), this.loadTurningBuffer()]);
 
     this.initialized = true;
   }
@@ -136,13 +133,18 @@ export class AudioEngine {
   }
 
   startAmbient(): void {
-    if (!this.ctx || this.ambientDecks.length !== 2) return;
-    const url = this.nextAmbientUrl();
-    if (!url) {
-      console.warn("No city ambience assets are available.");
-      return;
-    }
-    void this.startInitialAmbient(url);
+    const loop = this.runningLoop;
+    if (!this.ctx || !loop) return;
+    loop.element.currentTime = 0;
+    void loop.element.play().catch((error) => {
+      console.warn("Bot-running loop could not start.", error);
+    });
+    this.rampGain(
+      loop.gain,
+      1,
+      this.ctx.currentTime,
+      AUDIO.AMBIENT_CROSSFADE_MS / 1_000,
+    );
   }
 
   crossfadeTo(layer: AmbientLayer): void {
@@ -155,7 +157,7 @@ export class AudioEngine {
       this.ambientBusGain,
       target,
       this.ctx.currentTime,
-      getBotSettings().timing.audioCrossfade / 1000,
+      getBotSettings().timing.audioCrossfade / 1_000,
     );
     this.activeLayer = layer;
   }
@@ -200,30 +202,67 @@ export class AudioEngine {
     );
     source.connect(variationGain);
     variationGain.connect(this.footstepsGain);
-    this.activeBufferSources.add(source);
-    source.onended = () => {
-      this.activeBufferSources.delete(source);
-      source.disconnect();
-      variationGain.disconnect();
-    };
+    this.trackBufferSource(source, variationGain);
     source.start();
   }
 
+  playTurn(durationMs: number): void {
+    if (!this.ctx || !this.masterGain || !this.turningBuffer || durationMs <= 0) {
+      return;
+    }
+
+    const plan = createTurnPlaybackPlan(durationMs, this.turningBuffer.duration);
+    const source = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    const now = this.ctx.currentTime;
+    const end = now + plan.durationSec;
+    const attackEnd = now + Math.min(0.18, plan.durationSec * 0.2);
+    const peakTime = now + Math.min(0.55, plan.durationSec * 0.4);
+    const releaseStart = Math.max(attackEnd, end - Math.min(0.32, plan.durationSec * 0.25));
+
+    source.buffer = this.turningBuffer;
+    source.loop = true;
+    source.loopStart = 0;
+    source.loopEnd = this.turningBuffer.duration;
+    source.playbackRate.setValueAtTime(plan.startRate, now);
+    source.playbackRate.linearRampToValueAtTime(plan.peakRate, peakTime);
+    source.playbackRate.linearRampToValueAtTime(plan.endRate, end);
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(AUDIO.SFX_VOLUME, attackEnd);
+    gain.gain.setValueAtTime(AUDIO.SFX_VOLUME, releaseStart);
+    gain.gain.linearRampToValueAtTime(0, end);
+
+    source.connect(gain);
+    gain.connect(this.masterGain);
+    this.trackBufferSource(source, gain);
+    source.start(now, plan.offsetSec);
+    source.stop(end);
+  }
+
   beginTeleportAmbient(fadeOutMs: number): void {
-    if (!this.ctx || this.ambientDecks.length !== 2) return;
-    this.teleportAmbientTransition = true;
-    this.cancelAmbientTransition();
-    const deck = this.ambientDecks[this.activeDeckIndex];
+    if (!this.ctx || !this.runningLoop) return;
     this.rampGain(
-      deck.gain,
+      this.runningLoop.gain,
       0,
       this.ctx.currentTime,
       this.ambientFadeSeconds(fadeOutMs),
     );
   }
 
-  completeTeleportAmbient(changed: boolean, fadeInMs: number): void {
-    void this.finishTeleportAmbient(changed, fadeInMs);
+  completeTeleportAmbient(_changed: boolean, fadeInMs: number): void {
+    if (!this.ctx || !this.runningLoop) return;
+    if (this.runningLoop.element.paused) {
+      void this.runningLoop.element.play().catch((error) => {
+        console.warn("Bot-running loop could not resume after teleport.", error);
+      });
+    }
+    this.rampGain(
+      this.runningLoop.gain,
+      1,
+      this.ctx.currentTime,
+      this.ambientFadeSeconds(fadeInMs),
+    );
   }
 
   playBleep(): void {
@@ -236,7 +275,7 @@ export class AudioEngine {
 
   fadeToSilence(durationMs: number): void {
     if (!this.ctx || !this.masterGain) return;
-    this.rampGain(this.masterGain, 0, this.ctx.currentTime, durationMs / 1000);
+    this.rampGain(this.masterGain, 0, this.ctx.currentTime, durationMs / 1_000);
   }
 
   fadeFromSilence(durationMs: number): void {
@@ -246,21 +285,18 @@ export class AudioEngine {
     this.masterGain.gain.setValueAtTime(0, now);
     this.masterGain.gain.linearRampToValueAtTime(
       AUDIO.MASTER_VOLUME,
-      now + durationMs / 1000,
+      now + durationMs / 1_000,
     );
   }
 
   destroy(): void {
     this.stopTtsPlayback();
-    this.cancelAmbientTransition();
-    this.ambientTransitionGeneration += 1;
-    for (const deck of this.ambientDecks) {
-      deck.element.onended = null;
-      deck.element.ontimeupdate = null;
-      deck.element.onerror = null;
-      this.stopDeck(deck);
-      deck.source.disconnect();
-      deck.gain.disconnect();
+    if (this.runningLoop) {
+      this.runningLoop.element.pause();
+      this.runningLoop.element.removeAttribute("src");
+      this.runningLoop.element.load();
+      this.runningLoop.source.disconnect();
+      this.runningLoop.gain.disconnect();
     }
     for (const source of this.activeBufferSources) {
       try {
@@ -272,40 +308,30 @@ export class AudioEngine {
     }
     this.activeBufferSources.clear();
     void this.ctx?.close();
-    this.ambientDecks = [];
+    this.runningLoop = null;
+    this.turningBuffer = null;
     this.ctx = null;
     this.initialized = false;
   }
 
-  private createAmbientDeck(index: number): AmbientDeck {
+  private createRunningLoop(): RunningLoop {
     if (!this.ctx || !this.ambientBusGain) {
       throw new Error("AudioContext not initialized");
     }
-    const element = new Audio();
+    const element = new Audio(BOT_RUNNING_AUDIO_URL);
     element.preload = "auto";
+    element.loop = true;
     const gain = this.ctx.createGain();
     gain.gain.value = 0;
     const source = this.ctx.createMediaElementSource(element);
     source.connect(gain);
     gain.connect(this.ambientBusGain);
-    element.ontimeupdate = () => this.onAmbientTimeUpdate(index);
-    element.onended = () => this.onAmbientEnded(index);
-    return { element, gain, source, url: null };
+    return { element, gain, source };
   }
 
   private async loadFootsteps(): Promise<void> {
-    if (!this.ctx) return;
     const results = await Promise.all(
-      FOOTSTEP_AUDIO_URLS.map(async (url) => {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return await this.decodeAudioData(await response.arrayBuffer());
-        } catch (error) {
-          console.warn(`Footstep audio failed to load: ${url}`, error);
-          return null;
-        }
-      }),
+      FOOTSTEP_AUDIO_URLS.map((url) => this.fetchAudioBuffer(url, "Footstep")),
     );
     this.footstepBuffers = results.filter(
       (buffer): buffer is AudioBuffer => buffer !== null,
@@ -313,170 +339,42 @@ export class AudioEngine {
     this.footstepBag = new ShuffleBag(this.footstepBuffers);
   }
 
-  private async startInitialAmbient(url: string): Promise<void> {
-    const deck = this.ambientDecks[this.activeDeckIndex];
-    if (!(await this.loadAndPlayDeck(deck, url))) {
-      const fallback = this.nextAmbientUrl();
-      if (fallback) await this.startInitialAmbient(fallback);
-      return;
-    }
-    if (!this.ctx) return;
-    this.rampGain(
-      deck.gain,
-      1,
-      this.ctx.currentTime,
-      AUDIO.AMBIENT_CROSSFADE_MS / 1000,
+  private async loadTurningBuffer(): Promise<void> {
+    this.turningBuffer = await this.fetchAudioBuffer(
+      TURNING_AUDIO_URL,
+      "Turning",
     );
   }
 
-  private onAmbientTimeUpdate(index: number): void {
-    if (
-      index !== this.activeDeckIndex ||
-      this.ambientTransitioning ||
-      this.teleportAmbientTransition
-    ) {
-      return;
-    }
-    const element = this.ambientDecks[index]?.element;
-    if (!element || !Number.isFinite(element.duration)) return;
-    const remaining = element.duration - element.currentTime;
-    if (remaining <= AUDIO.AMBIENT_CROSSFADE_MS / 1000) {
-      void this.startNaturalCrossfade(AUDIO.AMBIENT_CROSSFADE_MS);
-    }
-  }
-
-  private onAmbientEnded(index: number): void {
-    if (
-      index === this.activeDeckIndex &&
-      !this.ambientTransitioning &&
-      !this.teleportAmbientTransition
-    ) {
-      void this.startNaturalCrossfade(1_000);
-    }
-  }
-
-  private async startNaturalCrossfade(durationMs: number): Promise<void> {
-    if (!this.ctx || this.ambientTransitioning || this.teleportAmbientTransition) {
-      return;
-    }
-    const url = this.nextAmbientUrl();
-    if (!url) return;
-
-    this.ambientTransitioning = true;
-    const generation = ++this.ambientTransitionGeneration;
-    const outgoingIndex = this.activeDeckIndex;
-    const incomingIndex = 1 - outgoingIndex;
-    const outgoing = this.ambientDecks[outgoingIndex];
-    const incoming = this.ambientDecks[incomingIndex];
-    this.stopDeck(incoming);
-
-    if (!(await this.loadAndPlayDeck(incoming, url))) {
-      this.ambientTransitioning = false;
-      if (generation === this.ambientTransitionGeneration) {
-        void this.startNaturalCrossfade(durationMs);
-      }
-      return;
-    }
-    if (!this.ctx || generation !== this.ambientTransitionGeneration) {
-      this.stopDeck(incoming);
-      return;
-    }
-
-    const now = this.ctx.currentTime;
-    const duration = durationMs / 1000;
-    this.rampGain(outgoing.gain, 0, now, duration);
-    this.rampGain(incoming.gain, 1, now, duration);
-    this.ambientTransitionTimer = setTimeout(() => {
-      if (generation !== this.ambientTransitionGeneration) return;
-      this.stopDeck(outgoing);
-      this.activeDeckIndex = incomingIndex;
-      this.ambientTransitioning = false;
-      this.ambientTransitionTimer = null;
-    }, durationMs);
-  }
-
-  private async finishTeleportAmbient(
-    changed: boolean,
-    fadeInMs: number,
-  ): Promise<void> {
-    if (!this.ctx || this.ambientDecks.length !== 2) return;
-    const duration = this.ambientFadeSeconds(fadeInMs);
-    let deck = this.ambientDecks[this.activeDeckIndex];
-
-    if (changed) {
-      const url = this.nextAmbientUrl();
-      if (url) {
-        const nextIndex = 1 - this.activeDeckIndex;
-        const nextDeck = this.ambientDecks[nextIndex];
-        this.stopDeck(nextDeck);
-        if (await this.loadAndPlayDeck(nextDeck, url)) {
-          this.stopDeck(deck);
-          this.activeDeckIndex = nextIndex;
-          deck = nextDeck;
-        }
-      }
-    } else if (deck.element.paused) {
-      try {
-        await deck.element.play();
-      } catch (error) {
-        console.warn("City ambience could not resume after a failed teleport.", error);
-      }
-    }
-
-    if (!this.ctx) return;
-    this.rampGain(deck.gain, 1, this.ctx.currentTime, duration);
-    this.teleportAmbientTransition = false;
-  }
-
-  private nextAmbientUrl(): string | undefined {
-    for (let attempts = 0; attempts < AMBIENT_AUDIO_URLS.length; attempts += 1) {
-      const url = this.ambientBag.next();
-      if (url && !this.failedAmbientUrls.has(url)) return url;
-    }
-    return undefined;
-  }
-
-  private async loadAndPlayDeck(
-    deck: AmbientDeck,
+  private async fetchAudioBuffer(
     url: string,
-  ): Promise<boolean> {
-    deck.url = url;
-    deck.gain.gain.value = 0;
-    deck.element.src = url;
-    deck.element.currentTime = 0;
+    label: string,
+  ): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
     try {
-      await deck.element.play();
-      return true;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await this.decodeAudioData(await response.arrayBuffer());
     } catch (error) {
-      this.failedAmbientUrls.add(url);
-      console.warn(`City ambience failed to play: ${url}`, error);
-      this.stopDeck(deck);
-      return false;
+      console.warn(`${label} audio failed to load: ${url}`, error);
+      return null;
     }
   }
 
-  private cancelAmbientTransition(): void {
-    this.ambientTransitionGeneration += 1;
-    if (this.ambientTransitionTimer) {
-      clearTimeout(this.ambientTransitionTimer);
-      this.ambientTransitionTimer = null;
-    }
-    this.ambientTransitioning = false;
-    if (this.ambientDecks.length === 2) {
-      this.stopDeck(this.ambientDecks[1 - this.activeDeckIndex]);
-    }
-  }
-
-  private stopDeck(deck: AmbientDeck): void {
-    deck.element.pause();
-    deck.element.removeAttribute("src");
-    deck.element.load();
-    deck.url = null;
-    deck.gain.gain.value = 0;
+  private trackBufferSource(
+    source: AudioBufferSourceNode,
+    gain: GainNode,
+  ): void {
+    this.activeBufferSources.add(source);
+    source.onended = () => {
+      this.activeBufferSources.delete(source);
+      source.disconnect();
+      gain.disconnect();
+    };
   }
 
   private ambientFadeSeconds(requestedMs: number): number {
-    return Math.max(requestedMs, AUDIO.AMBIENT_RECOVERY_FADE_MIN_MS) / 1000;
+    return Math.max(requestedMs, AUDIO.AMBIENT_RECOVERY_FADE_MIN_MS) / 1_000;
   }
 
   private playSfx(buffer: AudioBuffer | null): void {
@@ -487,6 +385,7 @@ export class AudioEngine {
     source.buffer = buffer;
     source.connect(gain);
     gain.connect(this.masterGain);
+    this.trackBufferSource(source, gain);
     source.start();
   }
 

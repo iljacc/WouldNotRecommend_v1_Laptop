@@ -6,6 +6,7 @@ import {
   decibelsToGain,
   randomBetween,
 } from "../src/engine/audio-shuffle";
+import { createTurnPlaybackPlan } from "../src/engine/turn-audio";
 
 describe("ShuffleBag", () => {
   it("emits each item once before refilling", () => {
@@ -40,15 +41,35 @@ describe("audio variation", () => {
   });
 });
 
+describe("turn playback variation", () => {
+  it("keeps offset and playback rates within restrained bounds", () => {
+    const values = [0.999, 0.999];
+    const plan = createTurnPlaybackPlan(3_125, 13.959, () => values.shift() ?? 0);
+
+    expect(plan.offsetSec).toBeGreaterThanOrEqual(0);
+    expect(plan.offsetSec).toBeLessThan(13.959);
+    expect(plan.startRate).toBeGreaterThanOrEqual(0.92);
+    expect(plan.peakRate).toBeLessThanOrEqual(1.09);
+    expect(plan.endRate).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("matches the requested camera-turn duration exactly", () => {
+    expect(createTurnPlaybackPlan(1_500, 13.959, () => 0.5).durationSec).toBe(1.5);
+    expect(createTurnPlaybackPlan(3_125, 13.959, () => 0.5).durationSec).toBe(3.125);
+  });
+});
+
 describe("runtime wiring contracts", () => {
   const root = process.cwd();
 
   it("routes supplied assets through the audio engine", () => {
     const engine = readFileSync(join(root, "src/engine/audio-engine.ts"), "utf8");
-    expect(engine).toContain("AMBIENT_AUDIO_URLS");
+    expect(engine).toContain("BOT_RUNNING_AUDIO_URL");
+    expect(engine).toContain("TURNING_AUDIO_URL");
     expect(engine).toContain("FOOTSTEP_AUDIO_URLS");
     expect(engine).toContain("createMediaElementSource");
     expect(engine).toContain("playFootsteps");
+    expect(engine).toContain("playTurn(durationMs: number)");
     expect(engine).toContain("beginTeleportAmbient");
     expect(engine).toContain("completeTeleportAmbient");
   });

@@ -110,7 +110,7 @@ No Places API key is needed or used.
 - `/api/places` always serves local SQLite data.
 - When a review target is selected, the bot stops walking and plays the entry
   bleep before the camera moves. By default, it turns toward the business over
-  2.5 seconds with gentle easing, holds the aligned view for 950 ms, and then
+  3.125 seconds with gentle easing, holds the aligned view for 950 ms, and then
   reads the review while stopped. The CSS wobble pauses on its exact current
   frame throughout `DELIVER` and resumes for the `RETURN` pan.
   During speech, the original HUD presentation remains green Processing text
@@ -118,8 +118,8 @@ No Places API key is needed or used.
   the exact reading view on screen. The exit
   bloop then starts immediately before the return pan begins and may overlap it;
   walking resumes only after that pan completes.
-- City ambience comes from seven unique masters in `audio/ambient/`. `npm run audio:prepare` deduplicates and level-matches them into 48 kHz Opus files under `public/audio/ambient/`, converts the twelve `audio/steps/` pairs to 48 kHz WAV, and regenerates `src/lib/audio-assets.ts`. FFmpeg and FFprobe must be available on `PATH` when regenerating assets.
-- `AudioEngine` streams ambience through two Web Audio-connected media decks. Tracks use an eight-second natural crossfade and a no-immediate-repeat shuffle. Successful teleports advance to a new recording; failed teleports restore the current one. Review speech ducks but does not mute the field recording.
+- `npm run audio:prepare` converts the exact bot-running master in `audio/bot_running/` to a 48 kHz Opus loop, the exact mechanical master in `audio/turning_loop/` to a 48 kHz WAV, and the twelve `audio/steps/` pairs to 48 kHz WAV. It writes committed browser assets under `public/audio/` and regenerates `src/lib/audio-assets.ts`. FFmpeg and FFprobe must be available on `PATH` when regenerating assets.
+- `AudioEngine` streams one continuous bot-running loop and ducks it beneath review speech. Both review camera turns play randomized sections of the decoded mechanical loop with restrained playback-rate, pitch, and gain envelopes. The sound duration is the camera duration: 3.125 seconds inward and 1.5 seconds outward by default.
 - `StreetViewController.onSuccessfulStep` is the sole footstep trigger. Each successful panorama move plays one complete two-foot clip from the combined asphalt/tile shuffle pool with restrained pitch and gain variation.
 - `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
 - `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.

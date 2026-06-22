@@ -32,6 +32,21 @@ data/db/would-not-recommend.db
 
 Do not commit `.env.local`, `.venv-piper`, `.tmp`, `.next`, `node_modules`, or downloaded voice models.
 
+## Runtime Audio
+
+The browser-ready bot-running loop, mechanical turning loop, and footsteps are
+committed under `public/audio`, so a fresh clone can play them immediately.
+Regeneration is only needed when changing the source masters. The preparation
+script expects these exact local files:
+
+```txt
+audio/bot_running/UIData_Generic Robotics Medium Data Processing Constant 01_B00M_ONE_2.wav
+audio/turning_loop/UIData_Generic Robotics Medium Data Processing Constant 01_B00M_ONE.wav
+```
+
+With FFmpeg and FFprobe on `PATH`, regenerate them with `npm run audio:prepare`.
+The raw `audio/` directory remains intentionally untracked.
+
 ## Piper Voice
 
 The live bot uses the fixed voice configured in:

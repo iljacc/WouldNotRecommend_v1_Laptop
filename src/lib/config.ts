@@ -2,7 +2,7 @@ import type { LatLng } from "./types";
 
 export const TIMING = {
   /** Rotation when facing the business from the road. */
-  ALIGN_PAN_MS: 2_500,
+  ALIGN_PAN_MS: 3_125,
   /** Hold (ms) after align pan finishes, still facing shop, before next state. */
   ALIGN_HOLD_MS: 950,
   /** Hard cap for DETECT before review delivery starts, even if browser rendering pauses. */
@@ -12,9 +12,9 @@ export const TIMING = {
   /** Stay still in DELIVER for two seconds after speech ends before the return pan. */
   POST_TTS_HOLD_MS: 2_000,
   /** Smooth rotation back toward the wander / road heading after a review. */
-  RETURN_PAN_DURATION: 1_200,
+  RETURN_PAN_DURATION: 1_500,
   /** RETURN state timer — must run slightly longer than the pan animation so we never snap early. */
-  RETURN_STATE_TIMER_MS: 1_400,
+  RETURN_STATE_TIMER_MS: 1_750,
   /** Ms between wander steps (new pano). Three seconds keeps review discovery close to the "every 3 steps" artwork cadence. */
   WANDER_STEP_INTERVAL: 3_000,
   /** Full teleport sequence ≈ sum of three (ms); imagery_fault uses shorter fades in bot. */

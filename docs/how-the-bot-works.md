@@ -35,15 +35,14 @@ cadence.
 
 ### What the bot sounds like
 
-Seven city field recordings play in a shuffled rotation. Two streaming audio
-decks overlap for an eight-second crossfade near each recording's end, and the
-shuffle avoids immediate repeats. A successful teleport advances to the next
-recording: the old scene fades down, the new recording starts from its
-beginning, and it fades in with the new Street View scene. If a teleport cannot
-resolve a walkable panorama, the current recording resumes instead.
+One bot-running recording loops continuously for the session. It remains softly
+audible beneath spoken reviews and returns to its normal level afterward.
+Every camera turn toward a review and back to the road layers in a short section
+of the supplied mechanical turning loop. Each turn chooses a nearby random
+starting point and restrained playback speed, then uses a gentle pitch and gain
+rise-and-fall envelope that ends exactly with the camera movement.
 
-The ambience remains softly audible beneath spoken reviews and returns to its
-normal level afterward. Every confirmed Street View step plays one of twelve
+Every confirmed Street View step plays one of twelve
 supplied two-foot clips. Asphalt and tile clips share one shuffle pool, with
 small gain and playback-rate changes on every movement. Failed or cancelled
 movement attempts do not produce footsteps.
@@ -101,9 +100,9 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 ### State flow
 
 1. **Wander:** move through Street View and periodically check local review candidates.
-2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and hold the aligned view for 950 ms before speech starts.
+2. **Detect:** stop walking, play the entry bleep, then start the mechanical turn sound and turn toward the chosen business over a default 3.125 seconds with gentle easing. Hold the aligned view for 950 ms before speech starts.
 3. **Deliver:** pause the CSS wobble on its exact current frame, optionally capture a screenshot, then read the selected review aloud with subtitles. The original HUD presentation remains unchanged: green Processing text with a white pulsing text glyph. After speech ends, remain on the exact reading view for two seconds.
-4. **Return:** start the exit bloop immediately before the return pan begins, pan back toward the wander heading while the sound may still be playing, and resume walking only when the pan completes.
+4. **Return:** start the exit bloop immediately before the return pan, play a new randomized 1.5-second mechanical turn, and resume walking only when the pan completes.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
 ## Technical Reference
@@ -113,7 +112,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | State machine | `src/engine/state-machine.ts` |
 | Orchestration | `src/engine/bot.ts`, especially `checkForBusiness` |
 | Street View movement | `src/engine/street-view-controller.ts` |
-| Ambient and footstep playback | `src/engine/audio-engine.ts` |
+| Bot-running loop, turn texture, and footsteps | `src/engine/audio-engine.ts` |
 | Audio asset preparation | `scripts/prepare-audio-assets.cjs` |
 | Local places/reviews route | `src/app/api/places/route.ts` |
 | Local corpus DB helpers | `src/lib/db.ts` |
@@ -127,9 +126,10 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | --- | ---: | --- |
 | `queryDistanceThreshold` | 75 m | Minimum movement before another local candidate query can run |
 | `queryMinInterval` | 9,000 ms | Minimum time between local candidate queries |
-| `ALIGN_PAN_MS` | 2,500 ms | Gently eased camera turn toward the selected business |
+| `ALIGN_PAN_MS` | 3,125 ms | Gently eased camera turn toward the selected business |
 | `ALIGN_HOLD_MS` | 950 ms | Hold facing the business after the pan and before speech begins |
 | `POST_TTS_HOLD_MS` | 2,000 ms | Still hold on the reading view after speech ends before the return pan begins |
+| `RETURN_PAN_DURATION` | 1,500 ms | Camera and mechanical-audio turn back toward the road |
 | Street View wobble | `WANDER`: ~69 px x / 9 px y; otherwise: ~14 px x / 5.5 px y | Maximum positive offsets on an eight-second CSS-only cycle; stationary motion persists through both turn states and is disabled with reduced motion |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |
 | `detectionRadius` | 700 m | Kept for settings continuity; local candidates bypass the hard cutoff |

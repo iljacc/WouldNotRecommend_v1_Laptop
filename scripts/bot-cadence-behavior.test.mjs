@@ -51,8 +51,8 @@ assert.equal(
 
 assert.equal(
   numericConst("ALIGN_PAN_MS"),
-  2500,
-  "business alignment should use a deliberate 2.5 second pan",
+  3125,
+  "business alignment should be 25% slower",
 );
 
 assert.equal(
@@ -62,9 +62,15 @@ assert.equal(
 );
 
 assert.equal(
+  numericConst("RETURN_PAN_DURATION"),
+  1500,
+  "the return pan should be 25% slower",
+);
+
+assert.equal(
   numericConst("RETURN_STATE_TIMER_MS"),
-  1400,
-  "return should be brief so reviews chain quickly",
+  1750,
+  "the return guard should remain longer than the slower pan",
 );
 
 assert.doesNotMatch(
@@ -116,7 +122,19 @@ assert.match(
 
 assert.match(
   bot,
-  /handleBusinessPan[\s\S]*?panToHeading\(bearingDeg, timing\.alignPanMs\)[\s\S]*?alignHoldMs[\s\S]*?this\.dispatch\(\{ type: "DETECT_COMPLETE" \}\)/,
+  /case "PAN_TO_BUSINESS":[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.alignPanMs;[\s\S]*?this\.audio\.playTurn\(durationMs\);[\s\S]*?handleBusinessPan\(effect\.bearingDeg, durationMs\)/,
+  "business alignment should start turn audio with the same duration as the pan",
+);
+
+assert.match(
+  bot,
+  /case "PAN_TO_WANDER_HEADING"[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.returnPanDuration;[\s\S]*?this\.audio\.playTurn\(durationMs\);[\s\S]*?panToHeading\(\s*back,\s*durationMs/,
+  "road return should start turn audio with the same duration as the pan",
+);
+
+assert.match(
+  bot,
+  /handleBusinessPan\(\s*bearingDeg: number,\s*durationMs: number,?\s*\)[\s\S]*?panToHeading\(bearingDeg, durationMs\)[\s\S]*?alignHoldMs[\s\S]*?this\.dispatch\(\{ type: "DETECT_COMPLETE" \}\)/,
   "review delivery should start only after the business-facing pan and hold complete",
 );
 

@@ -321,16 +321,21 @@ export class Bot {
         ]);
         break;
 
-      case "PAN_TO_BUSINESS":
-        void this.handleBusinessPan(effect.bearingDeg);
+      case "PAN_TO_BUSINESS": {
+        const durationMs = getBotSettings().timing.alignPanMs;
+        this.audio.playTurn(durationMs);
+        void this.handleBusinessPan(effect.bearingDeg, durationMs);
         break;
+      }
 
       case "PAN_TO_WANDER_HEADING": {
         const back = this.context.wanderHeadingBeforeReview;
         if (back !== null) {
+          const durationMs = getBotSettings().timing.returnPanDuration;
+          this.audio.playTurn(durationMs);
           void this.streetView.panToHeading(
             back,
-            getBotSettings().timing.returnPanDuration,
+            durationMs,
           );
         }
         break;
@@ -642,11 +647,14 @@ export class Bot {
     }
   }
 
-  private async handleBusinessPan(bearingDeg: number): Promise<void> {
+  private async handleBusinessPan(
+    bearingDeg: number,
+    durationMs: number,
+  ): Promise<void> {
     const timing = getBotSettings().timing;
     const completed = await this.withTimeout(
       (async () => {
-        await this.streetView.panToHeading(bearingDeg, timing.alignPanMs);
+        await this.streetView.panToHeading(bearingDeg, durationMs);
         if (timing.alignHoldMs > 0) {
           await this.sleep(timing.alignHoldMs);
         }
