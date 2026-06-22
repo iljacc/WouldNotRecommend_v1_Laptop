@@ -1,34 +1,52 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 
 /**
- * Production start with optional presentation browser windows.
- *
- * Defaults for the gallery laptop:
- * - Windows opens /bot and /terminal in fullscreen app windows.
- * - Both windows share one browser profile so BroadcastChannel still works.
+ * Production server and presentation-window supervisor.
  *
  * Env:
- *   PORT - passed through to Next (same as `next start`).
- *   GSV_KIOSK - 0/false to skip; 1/true to force kiosk even off Windows.
- *   GSV_KIOSK_PATH - path to Edge or Chrome/Chromium binary.
- *   GSV_KIOSK_URL - legacy single path, e.g. /bot.
- *   GSV_KIOSK_URLS - comma/semicolon-separated paths, e.g. /bot,/terminal.
- *   GSV_KIOSK_MODE - app or kiosk. Defaults to app for multiple windows.
- *   GSV_KIOSK_BOUNDS - semicolon-separated x,y,width,height window bounds.
- *   GSV_KIOSK_USER_DATA_DIR - browser profile dir, default .tmp/kiosk-browser.
+ *   PORT - Next.js port, default 3000.
+ *   GSV_KIOSK - 0/false to skip browser launch; 1/true to force it.
+ *   GSV_KIOSK_PATH - explicit Chrome, Edge, or Chromium executable.
+ *   GSV_KIOSK_URLS - comma/semicolon-separated paths, default /bot,/terminal.
+ *   GSV_KIOSK_MODE - app or kiosk. Multiple windows default to app.
+ *   GSV_KIOSK_BOUNDS - route-order x,y,width,height entries; overrides detection.
+ *   GSV_KIOSK_USER_DATA_DIR - dedicated browser profile directory.
  */
 
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const {
+  describeMonitors,
+  discoverWindowsMonitors,
+  parseBounds,
+  selectPresentationBounds,
+} = require("./windows-monitor-layout.cjs");
 
 const root = path.join(__dirname, "..");
 const port = Number.parseInt(process.env.PORT || "3000", 10);
-const defaultBounds = [
-  { x: 0, y: 0, width: 1920, height: 1080 },
-  { x: 1920, y: 0, width: 1920, height: 1080 },
+const logDir = path.join(root, ".tmp", "kiosk-logs");
+const logPath = path.join(logDir, "launcher.log");
+const browserChildren = new Set();
+let shuttingDown = false;
+
+// Installation fallback: TCL primary, Samsung immediately left and vertically centered.
+const fallbackBounds = [
+  { x: 0, y: 0, width: 3840, height: 2160 },
+  { x: -1920, y: 540, width: 1920, height: 1080 },
 ];
+
+function log(message, level = "log") {
+  const line = `${new Date().toISOString()} ${message}`;
+  console[level](`[start-with-kiosk] ${message}`);
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(logPath, `${line}\n`, "utf8");
+  } catch {
+    // Logging must never prevent the installation from starting.
+  }
+}
 
 function parseBooleanEnv(value) {
   if (value === undefined || value === "") return undefined;
@@ -39,25 +57,21 @@ function parseBooleanEnv(value) {
 }
 
 function shouldOpenKiosk() {
+  if (process.argv.includes("--kiosk")) return true;
   const explicit = parseBooleanEnv(process.env.GSV_KIOSK);
   if (explicit !== undefined) return explicit;
   return process.platform === "win32";
 }
 
-function findEdgeWindows() {
+function findWindowsBrowser(relativeParts, executable) {
   const dirs = [
-    process.env["ProgramFiles(x86)"],
     process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+    process.env.LocalAppData,
   ].filter(Boolean);
   for (const base of dirs) {
-    const edgePath = path.join(
-      base,
-      "Microsoft",
-      "Edge",
-      "Application",
-      "msedge.exe",
-    );
-    if (fs.existsSync(edgePath)) return edgePath;
+    const candidate = path.join(base, ...relativeParts, executable);
+    if (fs.existsSync(candidate)) return candidate;
   }
   return null;
 }
@@ -67,44 +81,32 @@ function findChromeLike() {
   if (custom && fs.existsSync(custom)) return custom;
 
   if (process.platform === "win32") {
-    const edge = findEdgeWindows();
-    if (edge) return edge;
-
-    const dirs = [
-      process.env["ProgramFiles(x86)"],
-      process.env.ProgramFiles,
-      process.env.LocalAppData,
-    ].filter(Boolean);
-    for (const base of dirs) {
-      const chrome = path.join(base, "Google", "Chrome", "Application", "chrome.exe");
-      if (fs.existsSync(chrome)) return chrome;
-    }
-    return null;
+    const chrome = findWindowsBrowser(
+      ["Google", "Chrome", "Application"],
+      "chrome.exe",
+    );
+    if (chrome) return chrome;
+    return findWindowsBrowser(
+      ["Microsoft", "Edge", "Application"],
+      "msedge.exe",
+    );
   }
 
   if (process.platform === "darwin") {
-    const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-    if (fs.existsSync(chrome)) return chrome;
-    const chromium = "/Applications/Chromium.app/Contents/MacOS/Chromium";
-    if (fs.existsSync(chromium)) return chromium;
-    return null;
+    const candidates = [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) || null;
   }
 
-  const candidates = [
-    "google-chrome-stable",
-    "google-chrome",
-    "chromium",
-    "chromium-browser",
-  ];
-  for (const bin of candidates) {
+  const { execFileSync } = require("child_process");
+  for (const binary of ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser"]) {
     try {
-      const { execSync } = require("child_process");
-      const resolved = execSync(`command -v ${bin} 2>/dev/null`, {
-        encoding: "utf8",
-      }).trim();
+      const resolved = execFileSync("which", [binary], { encoding: "utf8" }).trim();
       if (resolved) return resolved;
     } catch {
-      /* continue */
+      // Try the next browser candidate.
     }
   }
   return null;
@@ -115,67 +117,40 @@ function waitForHttpReady(url, maxAttempts = 90, delayMs = 500) {
     let attempts = 0;
     function tryOnce() {
       attempts += 1;
+      let retryScheduled = false;
+      function retryOnce() {
+        if (retryScheduled) return;
+        retryScheduled = true;
+        retry();
+      }
       const req = http.get(url, (res) => {
         res.resume();
         resolve();
       });
-      req.on("error", () => {
-        if (attempts >= maxAttempts) {
-          reject(new Error(`Timed out waiting for ${url}`));
-          return;
-        }
-        setTimeout(tryOnce, delayMs);
-      });
+      req.on("error", retryOnce);
       req.setTimeout(2500, () => {
         req.destroy();
-        if (attempts >= maxAttempts) {
-          reject(new Error(`Timed out waiting for ${url}`));
-          return;
-        }
-        setTimeout(tryOnce, delayMs);
+        retryOnce();
       });
+    }
+    function retry() {
+      if (attempts >= maxAttempts) {
+        reject(new Error(`Timed out waiting for ${url}`));
+      } else {
+        setTimeout(tryOnce, delayMs);
+      }
     }
     tryOnce();
   });
 }
 
 function parseUrlPaths() {
-  const raw =
-    process.env.GSV_KIOSK_URLS ||
-    process.env.GSV_KIOSK_URL ||
-    "/bot,/terminal";
+  const raw = process.env.GSV_KIOSK_URLS || process.env.GSV_KIOSK_URL || "/bot,/terminal";
   return raw
     .split(/[;,]/)
     .map((part) => part.trim())
     .filter(Boolean)
     .map((part) => (part.startsWith("/") ? part : `/${part}`));
-}
-
-function toLocalUrl(pathPart) {
-  return `http://127.0.0.1:${port}${pathPart}`;
-}
-
-function parseBounds() {
-  const raw = process.env.GSV_KIOSK_BOUNDS;
-  if (!raw) return defaultBounds;
-
-  const parsed = raw
-    .split(";")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const [x, y, width, height] = entry
-        .split(",")
-        .map((part) => Number.parseInt(part.trim(), 10));
-      if ([x, y, width, height].some((value) => Number.isNaN(value))) {
-        throw new Error(
-          `Invalid GSV_KIOSK_BOUNDS entry "${entry}". Use x,y,width,height.`,
-        );
-      }
-      return { x, y, width, height };
-    });
-
-  return parsed.length > 0 ? parsed : defaultBounds;
 }
 
 function getKioskMode(urlCount) {
@@ -186,13 +161,12 @@ function getKioskMode(urlCount) {
 
 function browserBaseArgs() {
   const profileDir =
-    process.env.GSV_KIOSK_USER_DATA_DIR ||
-    path.join(root, ".tmp", "kiosk-browser");
-
+    process.env.GSV_KIOSK_USER_DATA_DIR || path.join(root, ".tmp", "kiosk-browser");
   fs.mkdirSync(profileDir, { recursive: true });
-
   return [
     "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
     "--disable-infobars",
     "--disable-session-crashed-bubble",
     "--autoplay-policy=no-user-gesture-required",
@@ -205,16 +179,13 @@ function browserBaseArgs() {
 }
 
 function browserWindowArgs(browserPath, url, bounds, mode) {
-  const lowerPath = browserPath.toLowerCase();
-  const isEdge = lowerPath.endsWith("msedge.exe");
+  const isEdge = browserPath.toLowerCase().endsWith("msedge.exe");
   const baseArgs = browserBaseArgs();
-
   if (mode === "kiosk") {
     return isEdge
       ? [...baseArgs, "--kiosk", url, "--edge-kiosk-type=fullscreen"]
       : [...baseArgs, "--kiosk", url];
   }
-
   return [
     ...baseArgs,
     "--new-window",
@@ -225,16 +196,36 @@ function browserWindowArgs(browserPath, url, bounds, mode) {
   ];
 }
 
-function openBrowserWindow(browserPath, url, bounds, mode, index) {
-  const args = browserWindowArgs(browserPath, url, bounds, mode);
-  const child = spawn(browserPath, args, {
-    detached: true,
+function launchBrowserWindow(browserPath, url, bounds, mode, index, attempt = 0) {
+  if (shuttingDown) return;
+  const startedAt = Date.now();
+  const child = spawn(browserPath, browserWindowArgs(browserPath, url, bounds, mode), {
     stdio: "ignore",
+    windowsHide: false,
   });
-  child.unref();
-  console.log(
-    `[start-with-kiosk] Opened ${mode} window ${index + 1}: ${url}`,
-  );
+  browserChildren.add(child);
+  log(`Opened ${mode} window ${index + 1} at ${bounds.x},${bounds.y} ${bounds.width}x${bounds.height}: ${url}`);
+
+  child.on("error", (error) => log(`Browser window ${index + 1} error: ${error.message}`, "warn"));
+  child.on("exit", (code, signal) => {
+    browserChildren.delete(child);
+    if (shuttingDown) return;
+    const lifetimeMs = Date.now() - startedAt;
+    if (code === 0 && !signal && lifetimeMs < 5000) {
+      log(`Browser window ${index + 1} delegated to the existing kiosk profile.`);
+      return;
+    }
+    const nextAttempt = attempt + 1;
+    const retryMs = Math.min(2 ** nextAttempt * 1000, 30_000);
+    log(
+      `Browser window ${index + 1} exited (${signal || code}); relaunching in ${retryMs} ms.`,
+      "warn",
+    );
+    setTimeout(
+      () => launchBrowserWindow(browserPath, url, bounds, mode, index, nextAttempt),
+      retryMs,
+    );
+  });
 }
 
 function delay(ms) {
@@ -254,51 +245,50 @@ const nextChild = spawn(process.execPath, [nextCli, "start"], {
 });
 
 function shutdown(code) {
-  if (nextChild && !nextChild.killed) {
-    try {
-      nextChild.kill("SIGTERM");
-    } catch {
-      /* ignore */
-    }
+  shuttingDown = true;
+  for (const child of browserChildren) {
+    try { child.kill(); } catch { /* already gone */ }
+  }
+  if (!nextChild.killed) {
+    try { nextChild.kill("SIGTERM"); } catch { /* already gone */ }
   }
   process.exit(code ?? 0);
 }
 
 process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
-
 nextChild.on("exit", (code, signal) => {
-  if (signal) process.exit(1);
-  process.exit(code ?? 1);
+  if (shuttingDown) return;
+  log(`Next.js exited (${signal || code}).`, "warn");
+  shutdown(signal ? 1 : (code ?? 1));
 });
 
 (async () => {
   if (!shouldOpenKiosk()) {
-    console.log("[start-with-kiosk] Kiosk disabled.");
+    log("Kiosk browser launch disabled.");
     return;
   }
-
   const browser = findChromeLike();
   if (!browser) {
-    console.warn(
-      "[start-with-kiosk] No Edge/Chrome found; start the app URL manually.",
-    );
+    log("No Chrome, Edge, or Chromium browser found; open the app manually.", "warn");
     return;
   }
 
   const paths = parseUrlPaths();
-  const urls = paths.map(toLocalUrl);
-  const bounds = parseBounds();
+  const urls = paths.map((pathPart) => `http://127.0.0.1:${port}${pathPart}`);
+  const overrideBounds = parseBounds(process.env.GSV_KIOSK_BOUNDS);
+  const monitors = overrideBounds ? null : discoverWindowsMonitors();
+  const placement = selectPresentationBounds(paths, monitors, overrideBounds, fallbackBounds);
   const mode = getKioskMode(urls.length);
-  const probe = `http://127.0.0.1:${port}/`;
 
-  try {
-    await waitForHttpReady(probe);
-    for (let i = 0; i < urls.length; i += 1) {
-      openBrowserWindow(browser, urls[i], bounds[i] || bounds[0], mode, i);
-      await delay(750);
-    }
-  } catch (e) {
-    console.warn("[start-with-kiosk]", e.message || e);
+  log(`Browser: ${browser}`);
+  if (monitors) log(`Detected monitors: ${describeMonitors(monitors)}`);
+  log(`Window placement source: ${placement.source}`);
+  if (placement.warning) log(placement.warning, "warn");
+
+  await waitForHttpReady(`http://127.0.0.1:${port}/`);
+  for (let index = 0; index < urls.length; index += 1) {
+    launchBrowserWindow(browser, urls[index], placement.bounds[index], mode, index);
+    await delay(750);
   }
-})().catch((e) => console.warn("[start-with-kiosk]", e));
+})().catch((error) => log(error.message || String(error), "warn"));

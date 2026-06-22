@@ -25,6 +25,21 @@ While wandering, the rendered Street View layer also has a very slight CSS-only
 wiggle. This is a local transform on the already-rendered DOM surface; it does
 not call Google camera APIs or request new Street View imagery.
 
+### What the bot sounds like
+
+Seven city field recordings play in a shuffled rotation. Two streaming audio
+decks overlap for an eight-second crossfade near each recording's end, and the
+shuffle avoids immediate repeats. A successful teleport advances to the next
+recording: the old scene fades down, the new recording starts from its
+beginning, and it fades in with the new Street View scene. If a teleport cannot
+resolve a walkable panorama, the current recording resumes instead.
+
+The ambience remains softly audible beneath spoken reviews and returns to its
+normal level afterward. Every confirmed Street View step plays one of twelve
+supplied two-foot clips. Asphalt and tile clips share one shuffle pool, with
+small gain and playback-rate changes on every movement. Failed or cancelled
+movement attempts do not produce footsteps.
+
 ### How far it looks for reviews
 
 The bot periodically asks `/api/places` for local corpus places near its current coordinates. The server returns the nearest eligible local places, capped by `PLACES.LOCAL_CORPUS_NEAREST_PLACE_LIMIT`.
@@ -45,6 +60,9 @@ loaded voices in memory, so normal reviews avoid Python and ONNX model startup.
 If that worker fails, the request falls back once to the older one-shot Piper
 command; set `PIPER_PERSISTENT_WORKER=false` only for diagnostics. Successful
 responses expose model-load and synthesis durations through `Server-Timing`.
+Piper sentence chunks receive 300 ms of silent audio between them, giving full
+stops and question marks an audible beat without changing subtitle text or
+adding another inference pass.
 Before Piper synthesis, `/api/tts` normalizes review text
 and strips unsafe hidden control characters plus surrogate code units from the
 Piper-only copy; subtitles keep the original review text. If synthesis still
@@ -87,6 +105,8 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | State machine | `src/engine/state-machine.ts` |
 | Orchestration | `src/engine/bot.ts`, especially `checkForBusiness` |
 | Street View movement | `src/engine/street-view-controller.ts` |
+| Ambient and footstep playback | `src/engine/audio-engine.ts` |
+| Audio asset preparation | `scripts/prepare-audio-assets.cjs` |
 | Local places/reviews route | `src/app/api/places/route.ts` |
 | Local corpus DB helpers | `src/lib/db.ts` |
 | Review selection | `src/engine/review-manager.ts` |
@@ -110,6 +130,10 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | `reviewRepeatCooldownMinutes` | 180 | Time before the same review text can repeat |
 | `sessionReviewRepeatCooldownMinutes` | 30 | Time before the same review text can repeat in the current bot tab |
 | `placeRetryCooldownMinutes` | 5 | Time before retrying a place that had no passing review |
+| `AMBIENT_CROSSFADE_MS` | 8,000 ms | Overlap between ordinary field-recording changes |
+| `AMBIENT_RECOVERY_FADE_MIN_MS` | 1,000 ms | Minimum audio fade for fast imagery-recovery teleports |
+| `FOOTSTEP_RATE_VARIATION` | 0.025 | Maximum playback-rate change around the original step pair |
+| `FOOTSTEP_GAIN_VARIATION_DB` | 1.5 dB | Maximum randomized footstep gain change |
 
 ## Operational Notes
 
@@ -136,10 +160,15 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
   wake-lock acquired/released/failed/unsupported events as `RUNTIME` activity.
   This helps keep a visible kiosk display awake, but OS power settings, laptop
   lid policy, and browser visibility still take priority.
-- `npm start` runs `scripts/start-with-kiosk.cjs`, which starts the production
+- `npm run start:kiosk` (and the compatible `npm start`) runs
+  `scripts/start-with-kiosk.cjs`, which starts the production
   Next server and, by default on Windows, opens `/bot` and `/terminal` in
   fullscreen app windows using one shared browser profile. Keeping both windows
-  in the same profile preserves the `/terminal` `BroadcastChannel` mirror.
+  in the dedicated `.tmp/kiosk-browser` profile preserves the `/terminal`
+  `BroadcastChannel` mirror without using personal browser data. On Windows the
+  launcher maps `/bot` to the primary 4K monitor and `/terminal` to the
+  non-primary 1080p monitor by resolution and primary status rather than display
+  number. `GSV_KIOSK_BOUNDS` takes precedence over automatic placement.
   Override the launched paths with `GSV_KIOSK_URLS=/bot,/monitor` or disable
   browser launch with `GSV_KIOSK=0`.
 

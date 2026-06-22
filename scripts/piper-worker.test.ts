@@ -12,6 +12,8 @@ type WorkerResponse = {
   modelCacheHit?: boolean;
   modelLoadMs?: number;
   synthesisMs?: number;
+  sentenceCount?: number;
+  insertedSilenceMs?: number;
   error?: string;
 };
 
@@ -106,5 +108,28 @@ describe("persistent Piper worker", () => {
     expect(failed.error).toContain("Missing synthesis text");
     expect(recovered.ok).toBe(true);
     expect(fs.statSync(recoveryPath).size).toBeGreaterThan(44);
+  }, 60_000);
+
+  test("inserts configured silence between Piper sentence chunks", async () => {
+    const outputPath = path.join(tempDir, "sentence-silence.wav");
+    const modelPath = path.join(
+      process.cwd(),
+      "vendor",
+      "piper-voices",
+      "en_US-ryan-medium.onnx",
+    );
+    const response = await send({
+      id: "sentence-silence",
+      text: "This is the first sentence. This is the second sentence.",
+      modelPath,
+      outputPath,
+      lengthScale: 1,
+      sentenceSilenceMs: 300,
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.sentenceCount).toBe(2);
+    expect(response.insertedSilenceMs).toBe(300);
+    expect(fs.statSync(outputPath).size).toBeGreaterThan(44);
   }, 60_000);
 });

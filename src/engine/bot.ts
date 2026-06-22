@@ -587,6 +587,7 @@ export class Bot {
 
   private onWanderStep(): void {
     if (!this.running || this.context.state !== BotState.WANDER) return;
+    this.audio.playFootsteps();
     this.context = {
       ...this.context,
       stepsSinceLastReview: this.context.stepsSinceLastReview + 1,
@@ -814,7 +815,7 @@ export class Bot {
         `city tour hop | ${this.cityTour.getCurrentLabel()} → ${this.cityTour.getNextLabel()}`,
       ]);
     }
-    this.audio.fadeToSilence(fadeOut);
+    this.audio.beginTeleportAmbient(fadeOut);
     this.notifyStateChange();
     await this.sleep(fadeOut);
 
@@ -878,7 +879,7 @@ export class Bot {
 
     this.context = { ...this.context, teleportPhase: "fade-in" };
     postActivity("TELEPORT", ["fade-in"]);
-    this.audio.fadeFromSilence(fadeIn);
+    this.audio.completeTeleportAmbient(resolvedDestination !== null, fadeIn);
     this.notifyStateChange();
     await this.sleep(fadeIn);
 

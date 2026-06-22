@@ -31,6 +31,9 @@ def synthesize(request: dict[str, object]) -> dict[str, object]:
     model_path = str(request.get("modelPath", ""))
     output_path = str(request.get("outputPath", ""))
     length_scale_value = request.get("lengthScale")
+    sentence_silence_ms = max(
+        0, min(2000, int(request.get("sentenceSilenceMs", 0)))
+    )
 
     if not request_id:
         raise ValueError("Missing request id")
@@ -59,6 +62,7 @@ def synthesize(request: dict[str, object]) -> dict[str, object]:
     synthesis_config = SynthesisConfig(length_scale=length_scale)
     synthesis_started = time.perf_counter()
     wav_params_set = False
+    sentence_count = 0
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +74,18 @@ def synthesize(request: dict[str, object]) -> dict[str, object]:
                     wav_file.setsampwidth(audio_chunk.sample_width)
                     wav_file.setnchannels(audio_chunk.sample_channels)
                     wav_params_set = True
+                elif sentence_silence_ms > 0:
+                    silence_frames = round(
+                        audio_chunk.sample_rate * sentence_silence_ms / 1000
+                    )
+                    silence_bytes = bytes(
+                        silence_frames
+                        * audio_chunk.sample_width
+                        * audio_chunk.sample_channels
+                    )
+                    wav_file.writeframes(silence_bytes)
                 wav_file.writeframes(audio_chunk.audio_int16_bytes)
+                sentence_count += 1
 
         if not wav_params_set:
             raise RuntimeError("Piper produced no audio chunks")
@@ -85,6 +100,8 @@ def synthesize(request: dict[str, object]) -> dict[str, object]:
         "modelCacheHit": model_cache_hit,
         "modelLoadMs": model_load_ms,
         "synthesisMs": elapsed_ms(synthesis_started),
+        "sentenceCount": sentence_count,
+        "insertedSilenceMs": sentence_silence_ms * max(0, sentence_count - 1),
         "totalMs": elapsed_ms(total_started),
     }
 

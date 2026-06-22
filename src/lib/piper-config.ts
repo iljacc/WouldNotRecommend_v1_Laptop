@@ -16,6 +16,8 @@ export const PIPER_VOICE_MODEL_FILES = [
 ] as const;
 
 export const PIPER_VOICE_INDEX = 2;
+/** Silence inserted between Piper sentence chunks; affects playback, not inference. */
+export const PIPER_SENTENCE_SILENCE_MS = 300;
 
 export function getPiperModelPath(index: number): string {
   const file = PIPER_VOICE_MODEL_FILES[index];
