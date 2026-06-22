@@ -40,7 +40,8 @@ audible beneath spoken reviews and returns to its normal level afterward.
 Every camera turn toward a review and back to the road layers in a short section
 of the supplied mechanical turning loop. Each turn chooses a nearby random
 starting point and restrained playback speed, then uses a gentle pitch and gain
-rise-and-fall envelope that ends exactly with the camera movement.
+rise-and-fall envelope that ends with the camera movement. Early/no-op pans stop
+the texture immediately, and teleport or shutdown interruption fades it out.
 
 Every confirmed Street View step plays one of twelve
 supplied two-foot clips. Asphalt and tile clips share one shuffle pool, with

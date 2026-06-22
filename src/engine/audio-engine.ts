@@ -9,7 +9,11 @@ import { getBotSettings } from "@/lib/bot-settings";
 import { AUDIO } from "@/lib/config";
 import type { AmbientLayer } from "@/lib/types";
 import { ShuffleBag, decibelsToGain, randomBetween } from "./audio-shuffle";
-import { createTurnPlaybackPlan } from "./turn-audio";
+import {
+  createIdempotentTurnPlaybackHandle,
+  createTurnPlaybackPlan,
+  type TurnPlaybackHandle,
+} from "./turn-audio";
 
 type ToneDirection = "ascending" | "descending";
 
@@ -17,6 +21,12 @@ type RunningLoop = {
   element: HTMLAudioElement;
   gain: GainNode;
   source: MediaElementAudioSourceNode;
+};
+
+type ActiveTurnPlayback = {
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+  stopped: boolean;
 };
 
 export class AudioEngine {
@@ -27,6 +37,7 @@ export class AudioEngine {
   private footstepsGain: GainNode | null = null;
   private runningLoop: RunningLoop | null = null;
   private turningBuffer: AudioBuffer | null = null;
+  private activeTurnPlayback: ActiveTurnPlayback | null = null;
   private bleepBuffer: AudioBuffer | null = null;
   private bloopBuffer: AudioBuffer | null = null;
   private footstepBuffers: AudioBuffer[] = [];
@@ -206,11 +217,12 @@ export class AudioEngine {
     source.start();
   }
 
-  playTurn(durationMs: number): void {
+  playTurn(durationMs: number): TurnPlaybackHandle | null {
     if (!this.ctx || !this.masterGain || !this.turningBuffer || durationMs <= 0) {
-      return;
+      return null;
     }
 
+    this.stopActiveTurn();
     const plan = createTurnPlaybackPlan(durationMs, this.turningBuffer.duration);
     const source = this.ctx.createBufferSource();
     const gain = this.ctx.createGain();
@@ -235,12 +247,24 @@ export class AudioEngine {
 
     source.connect(gain);
     gain.connect(this.masterGain);
-    this.trackBufferSource(source, gain);
+    const playback: ActiveTurnPlayback = { source, gain, stopped: false };
+    this.activeTurnPlayback = playback;
+    source.onended = () => {
+      if (this.activeTurnPlayback === playback) {
+        this.activeTurnPlayback = null;
+      }
+      source.disconnect();
+      gain.disconnect();
+    };
     source.start(now, plan.offsetSec);
     source.stop(end);
+    return createIdempotentTurnPlaybackHandle(() =>
+      this.stopTurnPlayback(playback),
+    );
   }
 
   beginTeleportAmbient(fadeOutMs: number): void {
+    this.stopActiveTurn();
     if (!this.ctx || !this.runningLoop) return;
     this.rampGain(
       this.runningLoop.gain,
@@ -291,6 +315,7 @@ export class AudioEngine {
 
   destroy(): void {
     this.stopTtsPlayback();
+    this.stopActiveTurn(0);
     if (this.runningLoop) {
       this.runningLoop.element.pause();
       this.runningLoop.element.removeAttribute("src");
@@ -375,6 +400,34 @@ export class AudioEngine {
 
   private ambientFadeSeconds(requestedMs: number): number {
     return Math.max(requestedMs, AUDIO.AMBIENT_RECOVERY_FADE_MIN_MS) / 1_000;
+  }
+
+  private stopActiveTurn(fadeOutSeconds = 0.08): void {
+    if (this.activeTurnPlayback) {
+      this.stopTurnPlayback(this.activeTurnPlayback, fadeOutSeconds);
+    }
+  }
+
+  private stopTurnPlayback(
+    playback: ActiveTurnPlayback,
+    fadeOutSeconds = 0.08,
+  ): void {
+    if (playback.stopped) return;
+    playback.stopped = true;
+    if (this.activeTurnPlayback === playback) {
+      this.activeTurnPlayback = null;
+    }
+
+    const now = this.ctx?.currentTime ?? 0;
+    const stopAt = now + Math.max(0, fadeOutSeconds);
+    playback.gain.gain.cancelScheduledValues(now);
+    playback.gain.gain.setValueAtTime(playback.gain.gain.value, now);
+    playback.gain.gain.linearRampToValueAtTime(0, stopAt);
+    try {
+      playback.source.stop(stopAt);
+    } catch {
+      /* already stopped */
+    }
   }
 
   private playSfx(buffer: AudioBuffer | null): void {

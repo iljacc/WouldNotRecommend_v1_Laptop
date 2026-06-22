@@ -6,7 +6,11 @@ import {
   decibelsToGain,
   randomBetween,
 } from "../src/engine/audio-shuffle";
-import { createTurnPlaybackPlan } from "../src/engine/turn-audio";
+import {
+  createIdempotentTurnPlaybackHandle,
+  createTurnPlaybackPlan,
+  runWithTurnPlayback,
+} from "../src/engine/turn-audio";
 
 describe("ShuffleBag", () => {
   it("emits each item once before refilling", () => {
@@ -67,6 +71,65 @@ describe("turn playback variation", () => {
   });
 });
 
+describe("turn playback lifecycle", () => {
+  it("stops playback as soon as an early pan resolves", async () => {
+    let resolvePan!: () => void;
+    let stopCount = 0;
+    const pan = new Promise<void>((resolve) => {
+      resolvePan = resolve;
+    });
+    const completion = runWithTurnPlayback(
+      { stop: () => void (stopCount += 1) },
+      () => pan,
+    );
+
+    expect(stopCount).toBe(0);
+    resolvePan();
+    await completion;
+    expect(stopCount).toBe(1);
+  });
+
+  it("stops playback once when a pan rejects", async () => {
+    let stopCount = 0;
+
+    await expect(
+      runWithTurnPlayback(
+        { stop: () => void (stopCount += 1) },
+        () => Promise.reject(new Error("pan interrupted")),
+      ),
+    ).rejects.toThrow("pan interrupted");
+    expect(stopCount).toBe(1);
+  });
+
+  it("allows an absent playback handle for no-op audio", async () => {
+    await expect(
+      runWithTurnPlayback(null, () => Promise.resolve()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not stop an active source more than once", () => {
+    let stopCount = 0;
+    const playback = createIdempotentTurnPlaybackHandle(() => {
+      stopCount += 1;
+    });
+
+    playback.stop();
+    playback.stop();
+    expect(stopCount).toBe(1);
+  });
+
+  it("tolerates interruption before the pan finally cleans up", async () => {
+    let stopCount = 0;
+    const playback = createIdempotentTurnPlaybackHandle(() => {
+      stopCount += 1;
+    });
+
+    playback.stop();
+    await runWithTurnPlayback(playback, () => Promise.resolve());
+    expect(stopCount).toBe(1);
+  });
+});
+
 describe("runtime wiring contracts", () => {
   const root = process.cwd();
 
@@ -78,6 +141,12 @@ describe("runtime wiring contracts", () => {
     expect(engine).toContain("createMediaElementSource");
     expect(engine).toContain("playFootsteps");
     expect(engine).toContain("playTurn(durationMs: number)");
+    expect(engine).toMatch(
+      /beginTeleportAmbient\(fadeOutMs: number\): void \{\s*this\.stopActiveTurn\(\)/,
+    );
+    expect(engine).toMatch(
+      /destroy\(\): void \{[\s\S]*?this\.stopActiveTurn\(0\)/,
+    );
     expect(engine).toContain("beginTeleportAmbient");
     expect(engine).toContain("completeTeleportAmbient");
   });

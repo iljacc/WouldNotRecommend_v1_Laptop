@@ -24,6 +24,7 @@ import {
   type ReviewLogEntry,
   type TtsSubtitlePayload,
 } from "@/lib/types";
+import { runWithTurnPlayback } from "./turn-audio";
 import {
   canTriggerNextReview,
   createInitialContext,
@@ -323,7 +324,6 @@ export class Bot {
 
       case "PAN_TO_BUSINESS": {
         const durationMs = getBotSettings().timing.alignPanMs;
-        this.audio.playTurn(durationMs);
         void this.handleBusinessPan(effect.bearingDeg, durationMs);
         break;
       }
@@ -332,10 +332,9 @@ export class Bot {
         const back = this.context.wanderHeadingBeforeReview;
         if (back !== null) {
           const durationMs = getBotSettings().timing.returnPanDuration;
-          this.audio.playTurn(durationMs);
-          void this.streetView.panToHeading(
-            back,
-            durationMs,
+          void runWithTurnPlayback(
+            this.audio.playTurn(durationMs),
+            () => this.streetView.panToHeading(back, durationMs),
           );
         }
         break;
@@ -654,7 +653,10 @@ export class Bot {
     const timing = getBotSettings().timing;
     const completed = await this.withTimeout(
       (async () => {
-        await this.streetView.panToHeading(bearingDeg, durationMs);
+        await runWithTurnPlayback(
+          this.audio.playTurn(durationMs),
+          () => this.streetView.panToHeading(bearingDeg, durationMs),
+        );
         if (timing.alignHoldMs > 0) {
           await this.sleep(timing.alignHoldMs);
         }

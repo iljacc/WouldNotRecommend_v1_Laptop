@@ -122,14 +122,14 @@ assert.match(
 
 assert.match(
   bot,
-  /case "PAN_TO_BUSINESS":[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.alignPanMs;[\s\S]*?this\.audio\.playTurn\(durationMs\);[\s\S]*?handleBusinessPan\(effect\.bearingDeg, durationMs\)/,
-  "business alignment should start turn audio with the same duration as the pan",
+  /case "PAN_TO_BUSINESS":[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.alignPanMs;[\s\S]*?handleBusinessPan\(effect\.bearingDeg, durationMs\)[\s\S]*?runWithTurnPlayback\([\s\S]*?this\.audio\.playTurn\(durationMs\),[\s\S]*?this\.streetView\.panToHeading\(bearingDeg, durationMs\)/,
+  "business alignment should bind turn audio to the pan promise",
 );
 
 assert.match(
   bot,
-  /case "PAN_TO_WANDER_HEADING"[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.returnPanDuration;[\s\S]*?this\.audio\.playTurn\(durationMs\);[\s\S]*?panToHeading\(\s*back,\s*durationMs/,
-  "road return should start turn audio with the same duration as the pan",
+  /case "PAN_TO_WANDER_HEADING"[\s\S]*?const durationMs = getBotSettings\(\)\.timing\.returnPanDuration;[\s\S]*?runWithTurnPlayback\([\s\S]*?this\.audio\.playTurn\(durationMs\),[\s\S]*?panToHeading\(back, durationMs\)/,
+  "road return should bind turn audio to the pan promise",
 );
 
 assert.match(
