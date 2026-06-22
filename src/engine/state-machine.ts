@@ -109,6 +109,7 @@ export function transition(
             { type: "UNDUCK_AMBIENT" },
             { type: "LOG_REVIEW" },
             { type: "INCREMENT_COUNTER" },
+            { type: "PLAY_BLOOP" },
             { type: "PAN_TO_WANDER_HEADING" },
           ],
         };
@@ -126,7 +127,6 @@ export function transition(
         return {
           newState: BotState.WANDER,
           effects: [
-            { type: "PLAY_BLOOP" },
             { type: "CROSSFADE_TO_A" },
             { type: "START_WALKING" },
           ],

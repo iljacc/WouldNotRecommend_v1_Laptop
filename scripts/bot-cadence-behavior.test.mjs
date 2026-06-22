@@ -83,6 +83,31 @@ assert.match(
   "business detection must stop, bleep, crossfade, then pan",
 );
 
+const deliverCompleteBlock = stateMachine.match(
+  /event\.type === "DELIVER_COMPLETE"[\s\S]*?return null;/,
+);
+assert.ok(deliverCompleteBlock, "Missing DELIVER_COMPLETE transition");
+assert.match(
+  deliverCompleteBlock[0],
+  /effects:\s*\[\s*\{ type: "UNDUCK_AMBIENT" \},\s*\{ type: "LOG_REVIEW" \},\s*\{ type: "INCREMENT_COUNTER" \},\s*\{ type: "PLAY_BLOOP" \},\s*\{ type: "PAN_TO_WANDER_HEADING" \},\s*\]/,
+  "delivery completion must unduck, log, count, bloop, then pan",
+);
+
+const returnCompleteBlock = stateMachine.match(
+  /event\.type === "RETURN_COMPLETE"[\s\S]*?return null;/,
+);
+assert.ok(returnCompleteBlock, "Missing RETURN_COMPLETE transition");
+assert.doesNotMatch(
+  returnCompleteBlock[0],
+  /PLAY_BLOOP/,
+  "return completion must not play the exit bloop",
+);
+assert.match(
+  returnCompleteBlock[0],
+  /effects:\s*\[\s*\{ type: "CROSSFADE_TO_A" \},\s*\{ type: "START_WALKING" \},\s*\]/,
+  "return completion must crossfade before walking resumes",
+);
+
 assert.match(
   bot,
   /handleBusinessPan[\s\S]*?panToHeading\(bearingDeg, timing\.alignPanMs\)[\s\S]*?alignHoldMs[\s\S]*?this\.dispatch\(\{ type: "DETECT_COMPLETE" \}\)/,
