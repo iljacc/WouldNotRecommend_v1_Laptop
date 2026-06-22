@@ -46,10 +46,10 @@ export function getStreetViewEffectStyle(
   const yPx = Math.min(28, pitchSway * 10) * intensity;
   const rotateDeg = Math.min(1.05, sway * 0.075) * intensity;
   const durationSec = Math.min(34, Math.max(4, 10 / drift));
-  // The floor covers default drift on small kiosks; extra padding follows tuned amplitude.
+  // The floor covers small kiosks; amplitude padding includes an inverse-corner safety reserve.
   const amplitudePadding =
     xPx * 0.00175 + yPx * 0.00175 + rotateDeg * 0.012;
-  const scale = 1 + Math.max(0.03, amplitudePadding);
+  const scale = 1 + Math.max(0.03, amplitudePadding + 0.01);
 
   const style: CSSProperties & Record<`--${string}`, string | number> = {
     filter,

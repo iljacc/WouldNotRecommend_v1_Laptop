@@ -190,26 +190,31 @@ function assertOverscanContains(
   scale,
 ) {
   for (const keyframe of keyframeCoefficients) {
-    const radians = Math.abs(
-      (keyframe.rotate * rotateAmplitude * Math.PI) / 180,
-    );
-    const projectedHalfWidth =
-      (width * Math.cos(radians) + height * Math.abs(Math.sin(radians))) / 2;
-    const projectedHalfHeight =
-      (height * Math.cos(radians) + width * Math.abs(Math.sin(radians))) / 2;
-    const coveredHalfWidth =
-      scale * (projectedHalfWidth - Math.abs(keyframe.x * xAmplitude));
-    const coveredHalfHeight =
-      scale * (projectedHalfHeight - Math.abs(keyframe.y * yAmplitude));
+    const radians = (keyframe.rotate * rotateAmplitude * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const translateX = keyframe.x * xAmplitude;
+    const translateY = keyframe.y * yAmplitude;
 
-    assert(
-      coveredHalfWidth + 0.0001 >= width / 2,
-      `${styleName} keyframe ${keyframe.position}% leaves horizontal exposure at ${width}x${height}: covers ${coveredHalfWidth.toFixed(4)}, needs ${(width / 2).toFixed(4)}.`,
-    );
-    assert(
-      coveredHalfHeight + 0.0001 >= height / 2,
-      `${styleName} keyframe ${keyframe.position}% leaves vertical exposure at ${width}x${height}: covers ${coveredHalfHeight.toFixed(4)}, needs ${(height / 2).toFixed(4)}.`,
-    );
+    for (const cornerX of [-width / 2, width / 2]) {
+      for (const cornerY of [-height / 2, height / 2]) {
+        const untranslatedX = cornerX - translateX;
+        const untranslatedY = cornerY - translateY;
+        const sourceX =
+          (cos * untranslatedX + sin * untranslatedY) / scale;
+        const sourceY =
+          (-sin * untranslatedX + cos * untranslatedY) / scale;
+
+        assert(
+          Math.abs(sourceX) <= width / 2 + 0.0001,
+          `${styleName} keyframe ${keyframe.position}% maps viewport corner (${cornerX}, ${cornerY}) outside source width at ${width}x${height}: x=${sourceX.toFixed(4)}, limit=${(width / 2).toFixed(4)}.`,
+        );
+        assert(
+          Math.abs(sourceY) <= height / 2 + 0.0001,
+          `${styleName} keyframe ${keyframe.position}% maps viewport corner (${cornerX}, ${cornerY}) outside source height at ${width}x${height}: y=${sourceY.toFixed(4)}, limit=${(height / 2).toFixed(4)}.`,
+        );
+      }
+    }
   }
 }
 
@@ -243,6 +248,9 @@ assert(durationSec === 4, "The irregular CSS keyframe cycle should last exactly 
 assert(cappedX === 54, "Capped horizontal motion should remain exactly 54px.");
 assert(cappedY === 28, "Capped vertical motion should remain exactly 28px.");
 assert(cappedRotate === 1.05, "Capped rotation should remain exactly 1.05deg.");
+assertClose(defaultScale, 1.1329, 0.00005, "Default WANDER safety scale changed.");
+assertClose(stoppedScale, 1.0849, 0.00005, "Default stopped safety scale changed.");
+assertClose(cappedScale, 1.1661, 0.00005, "Capped WANDER safety scale changed.");
 assert(
   defaultScale >= 1.03,
   "Default Street View breathing should retain safe overscan on small kiosk viewports.",
@@ -296,6 +304,26 @@ assert(
   /@keyframes\s+wander-look-float/.test(css),
   "CSS should define the local-only wander wiggle keyframes.",
 );
+const keyframesCss = css.match(
+  /@keyframes\s+wander-look-float\s*\{([\s\S]*?)\n\s*@media/,
+)?.[1];
+assert(keyframesCss, "CSS should expose the complete wander wiggle keyframes.");
+const keyframeTransforms = [
+  ...keyframesCss.matchAll(/transform:\s*([\s\S]*?);/g),
+].map((match) => match[1]);
+assert(
+  keyframeTransforms.length === 4,
+  "Every wander wiggle keyframe should define one transform.",
+);
+for (const transform of keyframeTransforms) {
+  const translateIndex = transform.indexOf("translate3d(");
+  const rotateIndex = transform.indexOf("rotate(");
+  const scaleIndex = transform.indexOf("scale(");
+  assert(
+    translateIndex >= 0 && translateIndex < rotateIndex && rotateIndex < scaleIndex,
+    `Wander wiggle transforms must compose translate3d -> rotate -> scale, received: ${transform}`,
+  );
+}
 const reducedMotionRule = css.match(
   /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.street-view-breathing\s*\{([\s\S]*?)\}\s*\}/,
 )?.[1];
