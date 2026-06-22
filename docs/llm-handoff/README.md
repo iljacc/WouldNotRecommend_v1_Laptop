@@ -109,8 +109,9 @@ No Places API key is needed or used.
   stopped.
   During speech, the complete Processing text and glyph flash yellow/red;
   reduced-motion mode instead keeps them stable red and suppresses the glyph
-  pulse. After speech, the existing one-second stopped hold runs once, followed
-  by the return pan, existing exit bloop, and resumed walking.
+  pulse. After speech, the existing one-second stopped hold runs once. The exit
+  bloop then starts immediately before the return pan begins and may overlap it;
+  walking resumes only after that pan completes.
 - `/bot` uses one fixed Piper voice for every review: `PIPER_VOICE_INDEX` in `src/lib/piper-config.ts`, currently `2` (`en_US-ryan-medium`, male). Do not rotate voices in the live kiosk path unless the artwork direction changes.
 - `npm run setup:piper` creates `.venv-piper` and downloads only the configured Piper model plus metadata into `vendor/piper-voices/`. These generated runtime assets are intentionally ignored by Git.
 - `/api/tts` reuses a persistent `scripts/piper-worker.py` process. The worker caches loaded voices, serializes synthesis requests, returns timing metadata, and restarts on a later request after exit. Worker failure falls back once to the one-shot Piper CLI. Successful responses include `Server-Timing` and `X-Piper-Model-Cache` headers.
@@ -142,11 +143,14 @@ No Places API key is needed or used.
 - Street View imagery/CDN throttling is separate from review lookup. The bot watches repeated 429/5xx imagery responses and temporarily slows wander steps; avoid per-frame `setPov` behavior.
 - Street View starts, teleports, nudges, and linked steps are filtered through `StreetViewService` in `src/engine/street-view-panorama-data.ts`. Coordinate searches use `StreetViewSource.OUTDOOR`, and candidate panos must have at least one outgoing link so the bot does not spawn in or step into non-walkable photospheres.
 - Maps imagery diagnostics are client-only. `src/lib/maps-cdn-stress.ts` observes Street View imagery failures, `Bot` publishes `MAPS` activity lines, and `StreetViewController.sampleCanvasBrightness()` best-effort samples the Street View canvas. These diagnostics must not add Street View API calls or per-frame camera updates.
-- The Street View breathing drift remains active in every bot state. It is
-  stronger during `WANDER` and quieter while stopped, aligning, speaking,
-  returning, or teleporting. It transforms the rendered Street View layer with
-  CSS only: it must not drive per-frame Google `setPov` updates, request extra
-  imagery, add API traffic, or change local review polling cadence.
+- The Street View layer has a strong, continuous wobble in every bot state. Its
+  maximum positive horizontal offset is approximately 46 px during `WANDER` and
+  28 px while stopped or in another state, with proportional vertical and
+  rotational motion in a roughly four-second irregular cycle. Reduced-motion
+  mode disables both the wobble and its transition. It transforms the rendered Street View layer
+  with CSS only: it must not drive per-frame Google `setPov` updates, use browser
+  timers, request extra imagery, add Google/Street View API or service calls or
+  other network traffic, or change local review polling cadence.
 
 ## Local Review Corpus
 
@@ -167,6 +171,9 @@ See `docs/local-review-database.md` for import formats and schema details.
 
 `npm run test:no-google-places` scans runtime source and `.env.example` for old Places API paths, env toggles, and pagination settings. Keep it green when changing review lookup behavior.
 
-`npm run test:street-view-css-wiggle` guards the local CSS-only breathing motion,
-including its stronger Wander and quieter stopped-state intensity, so it stays
-subtle and does not call Google Street View POV APIs.
+`npm run test:street-view-css-wiggle` verifies the computed outputs from
+`getStreetViewEffectStyle`, including the approximately 46 px `WANDER` and 28 px
+stopped/non-`WANDER` maximum positive horizontal offsets, proportional
+vertical/rotation motion, roughly four-second irregular cycle, and
+reduced-motion override. It also verifies that this style computation has no
+direct browser-timer, network, or Google Street View POV side effects.

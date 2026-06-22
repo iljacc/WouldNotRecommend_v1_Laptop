@@ -21,12 +21,15 @@ Each step looks at outgoing Street View links from the current panorama. Before 
 - **Random link:** pick any connected panorama.
 
 After moving, the camera heading blends smoothly toward the chosen link heading.
-The rendered Street View layer also has a subtle, continuous CSS-only breathing
-drift in every bot state. It is stronger during Wander and quieter while the bot
-is stopped, aligning, speaking, returning, or teleporting. This is only a CSS
-transform on the already-rendered DOM surface; it does not make per-frame
-`setPov` calls, request additional Street View imagery, or change API or local
-review polling cadence.
+The rendered Street View layer also has a strong, continuous CSS-only wobble in
+every bot state. Its maximum positive horizontal offset is approximately 46 px
+during `WANDER` and 28 px while stopped or in another state, with proportional
+vertical and rotational movement in a roughly four-second irregular cycle.
+Reduced-motion mode disables both the wobble and its transition. This is only a
+CSS transform on the already-rendered DOM surface; it does not make per-frame `setPov` calls,
+use browser timers, request additional Street View imagery, add Google/Street
+View API or service calls, or change network traffic or local review polling
+cadence.
 
 ### How far it looks for reviews
 
@@ -80,7 +83,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 1. **Wander:** move through Street View and periodically check local review candidates.
 2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and briefly hold the view.
 3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles while the full Processing text and glyph flash yellow/red. With reduced motion enabled, Processing is stable red and the glyph does not pulse. After speech ends, remain stopped for the existing one-second hold once.
-4. **Return:** pan back toward the wander heading, then play the existing exit bloop and resume walking.
+4. **Return:** start the exit bloop immediately before the return pan begins, pan back toward the wander heading while the sound may still be playing, and resume walking only when the pan completes.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
 ## Technical Reference
@@ -105,6 +108,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | `ALIGN_PAN_MS` | 2,500 ms | Gently eased camera turn toward the selected business |
 | `ALIGN_HOLD_MS` | 450 ms | Short hold facing the business before speech begins |
 | `POST_TTS_HOLD_MS` | 1,000 ms | Processing hold after speech ends before the return pan begins |
+| Street View wobble | ~46 px `WANDER`; ~28 px otherwise | Maximum positive horizontal offset of the strong continuous CSS-only wobble, with proportional vertical/rotation motion on a roughly four-second irregular cycle; disabled with reduced motion |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |
 | `detectionRadius` | 700 m | Kept for settings continuity; local candidates bypass the hard cutoff |
 | `LOCAL_CORPUS_NEAREST_PLACE_LIMIT` | 80 | Max local place candidates returned per position |
@@ -187,7 +191,7 @@ Recommended checks:
     even if `/terminal` was not open.
 - If black frames persist, increase `MAPS_CDN.STRESS_MIN_WANDER_INTERVAL_MS` or
   `TIMING.WANDER_STEP_INTERVAL` in `src/lib/config.ts`.
-- Keep `STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED` CSS-only. Tune the wiggle through
+- Keep `STREET_VIEW.WANDER_LOOK_FLOAT_ENABLED` CSS-only. Tune the strong wobble through
   `WANDER_LOOK_SWAY_DEG`, `WANDER_LOOK_PITCH_SWAY_DEG`, and
   `WANDER_LOOK_DRIFT`; avoid per-frame `setPov` calls.
 - Avoid running multiple `/bot` tabs with the same Maps key during testing,
