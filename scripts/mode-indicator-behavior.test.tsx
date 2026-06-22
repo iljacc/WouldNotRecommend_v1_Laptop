@@ -33,18 +33,22 @@ function renderHud(state: BotState) {
   );
 }
 
-describe("complaint processing indicator", () => {
-  test("DELIVER flashes the group containing a current-color glyph and visible Processing label", () => {
+describe("rainbow processing indicator", () => {
+  test("DELIVER cycles the group containing a current-color glyph and visible Processing label", () => {
     const markup = renderHud(BotState.DELIVER);
 
     expect(markup).toMatch(
-      /class="flex items-center gap-2\.5 processing-complaint-flash"[\s\S]*?aria-hidden="true" data-mode-pulse-glyph="true" class="[^"]*text-current[^"]*"[\s\S]*?class="[^"]*text-current[^"]*opacity-100[^"]*">Processing<\/span>/,
+      /class="flex items-center gap-2\.5 processing-rainbow-cycle"[\s\S]*?aria-hidden="true" data-mode-pulse-glyph="true" class="[^"]*text-current[^"]*"[\s\S]*?class="[^"]*text-current[^"]*opacity-100[^"]*">Processing<\/span>/,
     );
   });
 
-  test("reduced motion disables pulse animation only for complaint glyphs", () => {
+  test("pastel rainbow cycles once per second and reduced motion disables its glyph pulse", () => {
+    for (const color of ["#fde68a", "#f9a8d4", "#c4b5fd", "#93c5fd", "#86efac", "#fdba74"]) {
+      expect(globalCss).toContain(color);
+    }
+    expect(globalCss).toMatch(/\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*processing-rainbow-cycle 1s linear infinite/);
     expect(globalCss).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-complaint-flash \[data-mode-pulse-glyph\]\s*\{[\s\S]*?animation:\s*none !important/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*none[\s\S]*?color:\s*#c4b5fd[\s\S]*?\.processing-rainbow-cycle \[data-mode-pulse-glyph\]\s*\{[\s\S]*?animation:\s*none !important/,
     );
     expect(globalCss).not.toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?^\s*\[data-mode-pulse-glyph\]\s*\{/m,
@@ -52,9 +56,9 @@ describe("complaint processing indicator", () => {
   });
 
   test.each([BotState.DETECT, BotState.RETURN])(
-    "%s does not apply the complaint flash",
+    "%s does not apply the rainbow cycle",
     (state) => {
-      expect(renderHud(state)).not.toContain("processing-complaint-flash");
+      expect(renderHud(state)).not.toContain("processing-rainbow-cycle");
     },
   );
 
@@ -84,7 +88,7 @@ describe("complaint processing indicator", () => {
 
     expect(markup).toContain("Teleporting");
     expect(markup).toContain("text-violet-400");
-    expect(markup).not.toContain("processing-complaint-flash");
+    expect(markup).not.toContain("processing-rainbow-cycle");
   });
 
   test("scheduled teleport glyph stays violet without complaint styling", () => {
@@ -98,6 +102,6 @@ describe("complaint processing indicator", () => {
 
     expect(markup).toContain("text-violet-400");
     expect(markup).not.toContain("text-current");
-    expect(markup).not.toContain("processing-complaint-flash");
+    expect(markup).not.toContain("processing-rainbow-cycle");
   });
 });

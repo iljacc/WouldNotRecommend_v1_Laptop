@@ -9,8 +9,8 @@ export const TIMING = {
   DETECT_MAX_WAIT_MS: 6_000,
   /** Legacy DETECT timer setting; the bot now advances after align pan + hold completes. */
   REVIEW_ALIGN_DURATION: 1_800,
-  /** Stay in DELIVER/Processing briefly after speech ends before returning to walking. */
-  POST_TTS_HOLD_MS: 1_000,
+  /** Stay still in DELIVER for two seconds after speech ends before the return pan. */
+  POST_TTS_HOLD_MS: 2_000,
   /** Smooth rotation back toward the wander / road heading after a review. */
   RETURN_PAN_DURATION: 1_200,
   /** RETURN state timer — must run slightly longer than the pan animation so we never snap early. */

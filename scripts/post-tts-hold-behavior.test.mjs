@@ -15,8 +15,8 @@ function numericConst(name) {
 
 assert.equal(
   numericConst("POST_TTS_HOLD_MS"),
-  1000,
-  "the bot should remain in Processing for one second after speech ends",
+  2000,
+  "the bot should remain still for two seconds after speech ends",
 );
 
 assert.match(

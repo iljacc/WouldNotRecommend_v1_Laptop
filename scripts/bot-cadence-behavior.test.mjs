@@ -158,8 +158,8 @@ assert.match(
 
 assert.match(
   hud,
-  /className=\{`flex items-center gap-2\.5 \$\{[\s\S]*?botState === BotState\.DELIVER[\s\S]*?processing-complaint-flash[\s\S]*?\}`\}[\s\S]*?<ModePulseGlyph[\s\S]*?<ModeIndicator[\s\S]*?state=\{botState\}/,
-  "HUD should flash the group wrapping both mode elements only during DELIVER and pass the actual state to ModeIndicator",
+  /className=\{`flex items-center gap-2\.5 \$\{[\s\S]*?botState === BotState\.DELIVER[\s\S]*?processing-rainbow-cycle[\s\S]*?\}`\}[\s\S]*?<ModePulseGlyph[\s\S]*?<ModeIndicator[\s\S]*?state=\{botState\}/,
+  "HUD should rainbow-cycle the group wrapping both mode elements only during DELIVER",
 );
 
 assert.match(
@@ -176,12 +176,12 @@ assert.match(
 
 assert.match(
   globalCss,
-  /@keyframes processing-complaint-flash[\s\S]*?0%[\s\S]*?#facc15[\s\S]*?50%[\s\S]*?#ef4444[\s\S]*?\.processing-complaint-flash\s*\{[\s\S]*?animation:\s*processing-complaint-flash 850ms ease-in-out infinite/,
-  "complaint flash should alternate yellow and red on an 850ms eased loop",
+  /@keyframes processing-rainbow-cycle[\s\S]*?#fde68a[\s\S]*?#f9a8d4[\s\S]*?#c4b5fd[\s\S]*?#93c5fd[\s\S]*?#86efac[\s\S]*?#fdba74[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*processing-rainbow-cycle 1s linear infinite/,
+  "Processing should cycle through the pastel rainbow once per second",
 );
 
 assert.match(
   globalCss,
-  /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-complaint-flash\s*\{[\s\S]*?animation:\s*none[^;]*;[\s\S]*?color:\s*#ef4444/,
-  "reduced motion should disable complaint flashing and leave the indicator stable red",
+  /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*none[^;]*;[\s\S]*?color:\s*#c4b5fd/,
+  "reduced motion should disable rainbow cycling and leave the indicator stable lavender",
 );

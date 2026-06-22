@@ -80,7 +80,7 @@ export function HUD({
           <div
             className={`flex items-center gap-2.5 ${
               botState === BotState.DELIVER
-                ? "processing-complaint-flash"
+                ? "processing-rainbow-cycle"
                 : ""
             }`}
           >
