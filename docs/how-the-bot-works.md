@@ -21,10 +21,12 @@ Each step looks at outgoing Street View links from the current panorama. Before 
 - **Random link:** pick any connected panorama.
 
 After moving, the camera heading blends smoothly toward the chosen link heading.
-The rendered Street View layer also has a strong, continuous CSS-only wobble in
-every bot state. Its maximum positive horizontal offset is approximately 46 px
-during `WANDER` and 28 px while stopped or in another state, with proportional
-vertical and rotational movement in a roughly four-second irregular cycle.
+The rendered Street View layer also has a continuous CSS-only wobble in every
+bot state. During `WANDER`, its maximum positive offsets are approximately 69 px
+horizontal and 9 px vertical. While stopped, reading, or turning in `DETECT` and
+`RETURN`, they are approximately 14 px horizontal and 5.5 px vertical with
+reduced rotation. Typed CSS properties ease between profiles without stopping
+the shared eight-second irregular cycle.
 Reduced-motion mode disables both the wobble and its transition. This is only a
 CSS transform on the already-rendered DOM surface; it does not make per-frame `setPov` calls,
 use browser timers, request additional Street View imagery, add Google/Street
@@ -82,7 +84,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 1. **Wander:** move through Street View and periodically check local review candidates.
 2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and briefly hold the view.
-3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles while the full Processing text and glyph flash yellow/red. With reduced motion enabled, Processing is stable red and the glyph does not pulse. After speech ends, remain stopped for the existing one-second hold once.
+3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles while the full Processing text and glyph cycle smoothly through pastel rainbow colors once per second. With reduced motion enabled, Processing is stable lavender and the glyph does not pulse. After speech ends, remain on the exact reading view for two seconds.
 4. **Return:** start the exit bloop immediately before the return pan begins, pan back toward the wander heading while the sound may still be playing, and resume walking only when the pan completes.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
@@ -107,8 +109,8 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | `queryMinInterval` | 9,000 ms | Minimum time between local candidate queries |
 | `ALIGN_PAN_MS` | 2,500 ms | Gently eased camera turn toward the selected business |
 | `ALIGN_HOLD_MS` | 450 ms | Short hold facing the business before speech begins |
-| `POST_TTS_HOLD_MS` | 1,000 ms | Processing hold after speech ends before the return pan begins |
-| Street View wobble | ~46 px `WANDER`; ~28 px otherwise | Maximum positive horizontal offset of the strong continuous CSS-only wobble, with proportional vertical/rotation motion on a roughly four-second irregular cycle; disabled with reduced motion |
+| `POST_TTS_HOLD_MS` | 2,000 ms | Still hold on the reading view after speech ends before the return pan begins |
+| Street View wobble | `WANDER`: ~69 px x / 9 px y; otherwise: ~14 px x / 5.5 px y | Maximum positive offsets on an eight-second CSS-only cycle; stationary motion persists through both turn states and is disabled with reduced motion |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |
 | `detectionRadius` | 700 m | Kept for settings continuity; local candidates bypass the hard cutoff |
 | `LOCAL_CORPUS_NEAREST_PLACE_LIMIT` | 80 | Max local place candidates returned per position |
@@ -124,6 +126,9 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 - Required remote key: `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` for browser Street View.
 - Review data: local SQLite only.
+- Each immediate session review-count increment replays a local 900 ms pastel
+  sparkle and shimmer around the review counter. It does not alter stats refresh
+  timing or database behavior; reduced motion disables the decoration.
 - City tour is opt-in: set `NEXT_PUBLIC_CITY_TOUR=true` only when deliberately testing the curated multi-city rotation. Leave it false or unset for fixed `The Hague` display.
 - Second laptop setup: `docs/installation-laptop.md`.
 - City display: `/api/geocode` validates coordinates and returns the fixed
