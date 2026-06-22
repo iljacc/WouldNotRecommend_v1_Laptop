@@ -23,7 +23,6 @@ interface Props {
   city: string;
   reviewsToday: number | null;
   lifetimeReviewsTotal: number | null;
-  reviewCount: number;
   sessionStartTime: number;
   subtitle: TtsSubtitlePayload | null;
   cityTourSegmentEndTime: number;
@@ -39,7 +38,6 @@ export function HUD({
   city,
   reviewsToday,
   lifetimeReviewsTotal,
-  reviewCount,
   sessionStartTime,
   subtitle,
   cityTourSegmentEndTime,
@@ -51,10 +49,10 @@ export function HUD({
     <div className="pointer-events-none absolute inset-0 z-[38] font-mono">
       <div className="absolute top-6 left-6 sm:top-8 sm:left-8">
         <ReviewStatsChip
-          key={`review-stats-${reviewCount}`}
+          key={`review-stats-${reviewsToday}-${lifetimeReviewsTotal}`}
           reviewsToday={reviewsToday}
           lifetimeTotal={lifetimeReviewsTotal}
-          celebrate={reviewCount > 0}
+          celebrate={reviewsToday !== null && lifetimeReviewsTotal !== null}
         />
       </div>
 
@@ -81,13 +79,7 @@ export function HUD({
 
       <div className="absolute bottom-6 right-6 sm:bottom-8 sm:right-8">
         <HudChip>
-          <div
-            className={`flex items-center gap-2.5 ${
-              botState === BotState.DELIVER
-                ? "processing-rainbow-cycle"
-                : ""
-            }`}
-          >
+          <div className="flex items-center gap-2.5">
             <ModePulseGlyph
               mode={mode}
               state={botState}
@@ -95,7 +87,6 @@ export function HUD({
             />
             <ModeIndicator
               mode={mode}
-              state={botState}
               showCityTourTeleport={scheduledCityTeleportUi}
             />
           </div>

@@ -84,7 +84,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 1. **Wander:** move through Street View and periodically check local review candidates.
 2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and briefly hold the view.
-3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles while the full Processing text and glyph cycle smoothly through pastel rainbow colors once per second. With reduced motion enabled, Processing is stable lavender and the glyph does not pulse. After speech ends, remain on the exact reading view for two seconds.
+3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles. The original HUD presentation remains unchanged: green Processing text with a white pulsing text glyph. After speech ends, remain on the exact reading view for two seconds.
 4. **Return:** start the exit bloop immediately before the return pan begins, pan back toward the wander heading while the sound may still be playing, and resume walking only when the pan completes.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
@@ -126,7 +126,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 
 - Required remote key: `NEXT_PUBLIC_MAPS_JAVASCRIPT_API_KEY` for browser Street View.
 - Review data: local SQLite only.
-- Each immediate session review-count increment replays a local 900 ms pastel
+- Each successful displayed review-total refresh replays a local 900 ms pastel
   sparkle and shimmer around the review counter. It does not alter stats refresh
   timing or database behavior; reduced motion disables the decoration.
 - City tour is opt-in: set `NEXT_PUBLIC_CITY_TOUR=true` only when deliberately testing the curated multi-city rotation. Leave it false or unset for fixed `The Hague` display.

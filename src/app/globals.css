@@ -106,19 +106,6 @@ a[href*="google.com/maps"] {
   initial-value: 1;
 }
 
-@keyframes processing-rainbow-cycle {
-  0% { color: #fde68a; }
-  20% { color: #f9a8d4; }
-  40% { color: #c4b5fd; }
-  60% { color: #93c5fd; }
-  80% { color: #86efac; }
-  100% { color: #fdba74; }
-}
-
-.processing-rainbow-cycle {
-  animation: processing-rainbow-cycle 1s linear infinite;
-}
-
 @keyframes review-counter-sparkle {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2) rotate(45deg); }
   30% { opacity: 1; }
@@ -206,15 +193,6 @@ a[href*="google.com/maps"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .processing-rainbow-cycle {
-    animation: none;
-    color: #c4b5fd;
-  }
-
-  .processing-rainbow-cycle [data-mode-pulse-glyph] {
-    animation: none !important;
-  }
-
   .street-view-breathing {
     animation: none !important;
     transform: scale(1) !important;

@@ -18,16 +18,18 @@ const hudSource = readFileSync(
   "utf8",
 );
 
-function renderHud(state: BotState, reviewCount = 0) {
+function renderHud(
+  state: BotState,
+  stats = { reviewsToday: 0 as number | null, lifetimeReviewsTotal: 0 as number | null },
+) {
   return renderToStaticMarkup(
     createElement(HUD, {
       mode: stateToMode(state),
       botState: state,
       coords: { lat: 52.0705, lng: 4.3007 },
       city: "The Hague",
-      reviewsToday: 0,
-      lifetimeReviewsTotal: 0,
-      reviewCount,
+      reviewsToday: stats.reviewsToday,
+      lifetimeReviewsTotal: stats.lifetimeReviewsTotal,
       sessionStartTime: 0,
       subtitle: null,
       cityTourSegmentEndTime: 0,
@@ -38,26 +40,17 @@ function renderHud(state: BotState, reviewCount = 0) {
   );
 }
 
-describe("rainbow processing indicator", () => {
-  test("DELIVER cycles the group containing a current-color glyph and visible Processing label", () => {
+describe("original processing indicator", () => {
+  test("DELIVER keeps the original green label and white glyph without a color-cycle class", () => {
     const markup = renderHud(BotState.DELIVER);
 
-    expect(markup).toMatch(
-      /class="flex items-center gap-2\.5 processing-rainbow-cycle"[\s\S]*?aria-hidden="true" data-mode-pulse-glyph="true" class="[^"]*text-current[^"]*"[\s\S]*?class="[^"]*text-current[^"]*opacity-100[^"]*">Processing<\/span>/,
-    );
+    expect(markup).not.toContain("processing-rainbow-cycle");
+    expect(markup).toMatch(/aria-hidden="true" class="[^"]*text-white[^"]*"/);
+    expect(markup).toMatch(/class="[^"]*text-green-400[^"]*opacity-100[^"]*">Processing<\/span>/);
   });
 
-  test("pastel rainbow cycles once per second and reduced motion disables its glyph pulse", () => {
-    for (const color of ["#fde68a", "#f9a8d4", "#c4b5fd", "#93c5fd", "#86efac", "#fdba74"]) {
-      expect(globalCss).toContain(color);
-    }
-    expect(globalCss).toMatch(/\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*processing-rainbow-cycle 1s linear infinite/);
-    expect(globalCss).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*none[\s\S]*?color:\s*#c4b5fd[\s\S]*?\.processing-rainbow-cycle \[data-mode-pulse-glyph\]\s*\{[\s\S]*?animation:\s*none !important/,
-    );
-    expect(globalCss).not.toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?^\s*\[data-mode-pulse-glyph\]\s*\{/m,
-    );
+  test("rainbow processing styles are absent", () => {
+    expect(globalCss).not.toContain("processing-rainbow-cycle");
   });
 
   test.each([BotState.DETECT, BotState.RETURN])(
@@ -67,17 +60,16 @@ describe("rainbow processing indicator", () => {
     },
   );
 
-  test("ordinary Processing is yellow", () => {
+  test("ordinary Processing is green", () => {
     const markup = renderToStaticMarkup(
       createElement(ModeIndicator, {
         mode: "Processing",
-        state: BotState.RETURN,
         showCityTourTeleport: false,
       }),
     );
 
     expect(markup).toMatch(
-      /class="[^"]*text-yellow-400[^"]*opacity-100[^"]*">Processing<\/span>/,
+      /class="[^"]*text-green-400[^"]*opacity-100[^"]*">Processing<\/span>/,
     );
     expect(markup).not.toContain("text-current");
   });
@@ -86,7 +78,6 @@ describe("rainbow processing indicator", () => {
     const markup = renderToStaticMarkup(
       createElement(ModeIndicator, {
         mode: "Processing",
-        state: BotState.TELEPORT,
         showCityTourTeleport: true,
       }),
     );
@@ -112,14 +103,21 @@ describe("rainbow processing indicator", () => {
 });
 
 describe("review counter celebration", () => {
-  test("HUD re-keys the counter from the immediate session review count", () => {
-    expect(hudSource).toMatch(/key=\{`review-stats-\$\{reviewCount\}`\}/);
-    expect(hudSource).toMatch(/celebrate=\{reviewCount > 0\}/);
+  test("HUD re-keys the counter from the displayed totals", () => {
+    expect(hudSource).toMatch(/key=\{`review-stats-\$\{reviewsToday\}-\$\{lifetimeReviewsTotal\}`\}/);
+    expect(hudSource).toMatch(/celebrate=\{reviewsToday !== null && lifetimeReviewsTotal !== null\}/);
+    expect(hudSource).not.toContain("reviewCount");
   });
 
-  test("first increment renders six accessible-hidden sparkles and a shimmer", () => {
-    const initialMarkup = renderHud(BotState.WANDER, 0);
-    const incrementMarkup = renderHud(BotState.RETURN, 1);
+  test("loaded or updated totals render six accessible-hidden sparkles and a shimmer", () => {
+    const initialMarkup = renderHud(BotState.WANDER, {
+      reviewsToday: null,
+      lifetimeReviewsTotal: null,
+    });
+    const incrementMarkup = renderHud(BotState.RETURN, {
+      reviewsToday: 4,
+      lifetimeReviewsTotal: 120,
+    });
 
     expect(initialMarkup).not.toContain("review-counter-celebration");
     expect(incrementMarkup).toContain('class="review-counter-celebration"');

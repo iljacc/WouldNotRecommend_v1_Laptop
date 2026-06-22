@@ -107,9 +107,8 @@ No Places API key is needed or used.
   bleep before the camera moves. By default, it turns toward the business over
   2.5 seconds with gentle easing, holds briefly, and then reads the review while
   stopped.
-  During speech, the complete Processing text and glyph run a smooth one-second
-  pastel rainbow cycle; reduced-motion mode instead keeps them stable lavender
-  and suppresses the glyph pulse. After speech, a two-second stopped hold keeps
+  During speech, the original HUD presentation remains green Processing text
+  with a white pulsing text glyph. After speech, a two-second stopped hold keeps
   the exact reading view on screen. The exit
   bloop then starts immediately before the return pan begins and may overlap it;
   walking resumes only after that pan completes.
@@ -154,10 +153,10 @@ No Places API key is needed or used.
   with CSS only: it must not drive per-frame Google `setPov` updates, use browser
   timers, request extra imagery, add Google/Street View API or service calls or
   other network traffic, or change local review polling cadence.
-- `ReviewStatsChip` is keyed by the immediate in-memory session review count.
-  Each increment remounts a 900 ms, `aria-hidden` pastel sparkle and clipped
-  shimmer decoration without timers or changes to the delayed database stats
-  refresh. Reduced motion disables both animations.
+- `ReviewStatsChip` is keyed by its displayed daily and lifetime totals. Each
+  successful totals update remounts a 900 ms, `aria-hidden` pastel sparkle and
+  clipped shimmer decoration without timers or changes to database refresh
+  behavior. Reduced motion disables both animations.
 
 ## Local Review Corpus
 

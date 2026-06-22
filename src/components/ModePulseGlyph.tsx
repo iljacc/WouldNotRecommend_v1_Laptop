@@ -92,13 +92,8 @@ export function ModePulseGlyph({ mode, state, cityTourTeleportBlink }: Props) {
   return (
     <div
       aria-hidden
-      data-mode-pulse-glyph
       className={`flex shrink-0 items-center justify-center will-change-[transform,opacity] ${
-        state === BotState.DELIVER
-          ? "text-current"
-          : cityTourTeleportBlink
-            ? "text-violet-400"
-            : "text-white"
+        cityTourTeleportBlink ? "text-violet-400" : "text-white"
       }`}
       style={{
         width: PULSING_DOT.SIZE,

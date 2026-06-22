@@ -1,17 +1,16 @@
 "use client";
 
-import { BotState, type BotMode } from "@/lib/types";
+import type { BotMode } from "@/lib/types";
 
 interface Props {
   mode: BotMode;
-  state: BotState;
   /** Scheduled city-tour hop only — replaces Searching/Processing entirely. */
   showCityTourTeleport: boolean;
 }
 
 const MODES: BotMode[] = ["Searching", "Processing"];
 
-export function ModeIndicator({ mode, state, showCityTourTeleport }: Props) {
+export function ModeIndicator({ mode, showCityTourTeleport }: Props) {
   if (showCityTourTeleport) {
     return (
       <span
@@ -35,9 +34,7 @@ export function ModeIndicator({ mode, state, showCityTourTeleport }: Props) {
           key={m}
           aria-hidden={mode !== m}
           className={`col-start-1 row-start-1 text-3xl font-medium tabular-nums leading-none transition-opacity duration-500 ease-in-out ${
-            m === "Processing" && mode === m && state === BotState.DELIVER
-              ? "text-current"
-              : "text-yellow-400"
+            m === "Searching" ? "text-yellow-400" : "text-green-400"
           } ${mode === m ? "z-[1] opacity-100" : "z-0 opacity-0"}`}
         >
           {m}

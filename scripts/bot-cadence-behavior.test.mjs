@@ -156,32 +156,18 @@ assert.match(
   "local corpus candidates should bypass detection radius while Google candidates remain radius-limited",
 );
 
-assert.match(
-  hud,
-  /className=\{`flex items-center gap-2\.5 \$\{[\s\S]*?botState === BotState\.DELIVER[\s\S]*?processing-rainbow-cycle[\s\S]*?\}`\}[\s\S]*?<ModePulseGlyph[\s\S]*?<ModeIndicator[\s\S]*?state=\{botState\}/,
-  "HUD should rainbow-cycle the group wrapping both mode elements only during DELIVER",
-);
+assert.doesNotMatch(hud, /processing-rainbow-cycle/, "HUD should retain the original Processing presentation");
 
 assert.match(
   modeIndicator,
-  /state:\s*BotState[\s\S]*?m === "Processing" && mode === m && state === BotState\.DELIVER[\s\S]*?"text-current"[\s\S]*?"text-yellow-400"/,
-  "active DELIVER Processing text should inherit the flashing group color while ordinary Processing stays yellow",
+  /m === "Searching" \? "text-yellow-400" : "text-green-400"/,
+  "the original indicator should keep Searching yellow and Processing green",
 );
 
 assert.match(
   modePulseGlyph,
-  /state === BotState\.DELIVER\s*\?\s*"text-current"[\s\S]*?cityTourTeleportBlink\s*\?\s*"text-violet-400"\s*:\s*"text-white"/,
-  "the DELIVER glyph should inherit group color while other glyph states retain their colors",
+  /cityTourTeleportBlink \? "text-violet-400" : "text-white"/,
+  "the original glyph should remain white outside scheduled teleport",
 );
 
-assert.match(
-  globalCss,
-  /@keyframes processing-rainbow-cycle[\s\S]*?#fde68a[\s\S]*?#f9a8d4[\s\S]*?#c4b5fd[\s\S]*?#93c5fd[\s\S]*?#86efac[\s\S]*?#fdba74[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*processing-rainbow-cycle 1s linear infinite/,
-  "Processing should cycle through the pastel rainbow once per second",
-);
-
-assert.match(
-  globalCss,
-  /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.processing-rainbow-cycle\s*\{[\s\S]*?animation:\s*none[^;]*;[\s\S]*?color:\s*#c4b5fd/,
-  "reduced motion should disable rainbow cycling and leave the indicator stable lavender",
-);
+assert.doesNotMatch(globalCss, /processing-rainbow-cycle/, "Processing rainbow CSS should be removed");
