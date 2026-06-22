@@ -42,6 +42,14 @@ describe("audio variation", () => {
 });
 
 describe("turn playback variation", () => {
+  it("keeps the randomized base rate within 0.96..1.04", () => {
+    const minimumPlan = createTurnPlaybackPlan(3_125, 13.959, () => 0);
+    const maximumPlan = createTurnPlaybackPlan(3_125, 13.959, () => 0.999);
+
+    expect(minimumPlan.startRate).toBeGreaterThanOrEqual(0.96);
+    expect(maximumPlan.startRate).toBeLessThanOrEqual(1.04);
+  });
+
   it("keeps offset and playback rates within restrained bounds", () => {
     const values = [0.999, 0.999];
     const plan = createTurnPlaybackPlan(3_125, 13.959, () => values.shift() ?? 0);

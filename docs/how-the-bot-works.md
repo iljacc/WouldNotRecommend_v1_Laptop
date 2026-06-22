@@ -141,8 +141,9 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | `reviewRepeatCooldownMinutes` | 180 | Time before the same review text can repeat |
 | `sessionReviewRepeatCooldownMinutes` | 30 | Time before the same review text can repeat in the current bot tab |
 | `placeRetryCooldownMinutes` | 5 | Time before retrying a place that had no passing review |
-| `AMBIENT_CROSSFADE_MS` | 8,000 ms | Overlap between ordinary field-recording changes |
-| `AMBIENT_RECOVERY_FADE_MIN_MS` | 1,000 ms | Minimum audio fade for fast imagery-recovery teleports |
+| Bot-running loop | Continuous | One recording loops for the session, with smooth gain ramps between searching, processing, TTS ducking, and teleport recovery |
+| Mechanical turn base rate | `0.96..1.04` | Randomized playback rate chosen for each review-facing and road-return turn before its restrained rise and fall |
+| `AMBIENT_RECOVERY_FADE_MIN_MS` | 1,000 ms | Minimum bot-running loop fade for fast imagery-recovery teleports |
 | `FOOTSTEP_RATE_VARIATION` | 0.025 | Maximum playback-rate change around the original step pair |
 | `FOOTSTEP_GAIN_VARIATION_DB` | 1.5 dB | Maximum randomized footstep gain change |
 

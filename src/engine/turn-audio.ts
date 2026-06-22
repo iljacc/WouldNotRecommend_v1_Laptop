@@ -20,7 +20,7 @@ export function createTurnPlaybackPlan(
   return {
     offsetSec: safeBufferDuration * random(),
     durationSec,
-    startRate: baseRate * 0.97,
+    startRate: baseRate,
     peakRate: baseRate * 1.045,
     endRate: baseRate * 0.95,
   };
