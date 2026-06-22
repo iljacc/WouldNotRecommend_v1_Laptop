@@ -114,8 +114,8 @@ assert(
   "Pitch wiggle should retain the tuned 1.8 CSS transform default.",
 );
 assert(
-  drift === 2.5,
-  "Drift should retain the tuned 2.5 CSS animation default.",
+  drift === 1.25,
+  "Drift should use the slower 1.25 CSS animation default.",
 );
 
 assert(
@@ -142,6 +142,8 @@ const stoppedTeleportStyle = getStreetViewEffectStyle(
   "warp",
   defaultSettings,
 );
+const detectStyle = getStreetViewEffectStyle(BotState.DETECT, "none", defaultSettings);
+const returnStyle = getStreetViewEffectStyle(BotState.RETURN, "none", defaultSettings);
 const wanderX = Number.parseFloat(wanderStyle["--wander-float-x"]);
 const wanderY = Number.parseFloat(wanderStyle["--wander-float-y"]);
 const wanderRotate = Number.parseFloat(wanderStyle["--wander-float-rotate"]);
@@ -233,24 +235,29 @@ assert(
   stoppedX > 0 && stoppedX < wanderX,
   "Stopped Street View breathing should be numerically quieter than WANDER.",
 );
-assertClose(wanderX, 12.1 * 3.8, 0.005, "WANDER horizontal motion changed.");
-assertClose(stoppedX, 12.1 * 3.8 * 0.61, 0.005, "Stopped horizontal motion changed.");
-assertClose(wanderY, 18, 0.005, "WANDER vertical motion changed.");
-assertClose(stoppedY, 18 * 0.61, 0.005, "Stopped vertical motion changed.");
+assertClose(wanderX, 12.1 * 3.8 * 1.5, 0.005, "WANDER horizontal motion changed.");
+assertClose(stoppedX, 12.1 * 3.8 * 0.305, 0.005, "Stopped horizontal motion changed.");
+assertClose(wanderY, 18 * 0.5, 0.005, "WANDER vertical motion changed.");
+assertClose(stoppedY, 18 * 0.305, 0.005, "Stopped vertical motion changed.");
 assertClose(wanderRotate, 12.1 * 0.075, 0.001, "WANDER rotation changed.");
 assertClose(
   stoppedRotate,
-  12.1 * 0.075 * 0.61,
+  12.1 * 0.075 * 0.305,
   0.001,
   "Stopped rotation changed.",
 );
-assert(durationSec === 4, "The irregular CSS keyframe cycle should last exactly four seconds.");
-assert(cappedX === 54, "Capped horizontal motion should remain exactly 54px.");
+for (const [name, style] of [["DETECT", detectStyle], ["RETURN", returnStyle]]) {
+  assertClose(Number.parseFloat(style["--wander-float-x"]), stoppedX, 0.005, `${name} should retain stationary horizontal wobble through the turn.`);
+  assertClose(Number.parseFloat(style["--wander-float-y"]), stoppedY, 0.005, `${name} should retain stationary vertical wobble through the turn.`);
+  assert(style.animation === stoppedTeleportStyle.animation, `${name} should keep the same continuous wobble animation.`);
+}
+assert(durationSec === 8, "The irregular CSS keyframe cycle should last exactly eight seconds.");
+assert(cappedX === 72, "Capped horizontal motion should allow the stronger 72px ceiling.");
 assert(cappedY === 28, "Capped vertical motion should remain exactly 28px.");
 assert(cappedRotate === 1.05, "Capped rotation should remain exactly 1.05deg.");
-assertClose(defaultScale, 1.1329, 0.00005, "Default WANDER safety scale changed.");
-assertClose(stoppedScale, 1.0849, 0.00005, "Default stopped safety scale changed.");
-assertClose(cappedScale, 1.1661, 0.00005, "Capped WANDER safety scale changed.");
+assertClose(defaultScale, 1.1573, 0.00015, "Default WANDER safety scale changed.");
+assertClose(stoppedScale, 1.0474, 0.00015, "Default stopped safety scale changed.");
+assertClose(cappedScale, 1.1976, 0.00015, "Capped WANDER safety scale changed.");
 assert(
   defaultScale >= 1.03,
   "Default Street View breathing should retain safe overscan on small kiosk viewports.",
@@ -304,6 +311,18 @@ assert(
   /@keyframes\s+wander-look-float/.test(css),
   "CSS should define the local-only wander wiggle keyframes.",
 );
+for (const propertyName of ["x", "y", "rotate", "scale"]) {
+  assert(
+    css.includes(`@property --wander-float-${propertyName}`),
+    `CSS should register --wander-float-${propertyName} for smooth state-profile interpolation.`,
+  );
+}
+for (const propertyName of ["x", "y", "rotate", "scale"]) {
+  assert(
+    String(wanderStyle.transition).includes(`--wander-float-${propertyName}`),
+    `Street View style should transition --wander-float-${propertyName} across turns.`,
+  );
+}
 const keyframesCss = css.match(
   /@keyframes\s+wander-look-float\s*\{([\s\S]*?)\n\s*@media/,
 )?.[1];

@@ -82,6 +82,30 @@ a[href*="google.com/maps"] {
   animation: teleport-mode-flash 1.1s ease-in-out infinite;
 }
 
+@property --wander-float-x {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --wander-float-y {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --wander-float-rotate {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --wander-float-scale {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
 @keyframes processing-complaint-flash {
   0%,
   100% {

@@ -126,8 +126,8 @@ export const STREET_VIEW = {
   WANDER_LOOK_SWAY_DEG: 12.1,
   /** Vertical CSS transform intensity; converted to pixels and capped by VisualEffects. */
   WANDER_LOOK_PITCH_SWAY_DEG: 1.8,
-  /** CSS animation drift rate; higher values shorten the wobble cycle. */
-  WANDER_LOOK_DRIFT: 2.5,
+  /** CSS animation drift rate; 1.25 produces the tuned eight-second cycle. */
+  WANDER_LOOK_DRIFT: 1.25,
 } as const;
 
 export const VISUAL = {

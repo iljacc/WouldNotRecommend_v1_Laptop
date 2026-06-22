@@ -38,13 +38,16 @@ export function getStreetViewEffectStyle(
     : `filter ${VISUAL.COLOR_TRANSITION}ms ease`;
 
   const floatEnabled = Boolean(streetView?.wanderLookFloatEnabled);
-  const intensity = botState === BotState.WANDER ? 1 : 0.61;
+  const walking = botState === BotState.WANDER;
+  const horizontalIntensity = walking ? 1.5 : 0.305;
+  const verticalIntensity = walking ? 0.5 : 0.305;
+  const rotationIntensity = walking ? 1 : 0.305;
   const drift = Math.max(0.01, streetView?.wanderLookDrift ?? 0.38);
   const sway = Math.max(0, streetView?.wanderLookSwayDeg ?? 0);
   const pitchSway = Math.max(0, streetView?.wanderLookPitchSwayDeg ?? 0);
-  const xPx = Math.min(54, sway * 3.8) * intensity;
-  const yPx = Math.min(28, pitchSway * 10) * intensity;
-  const rotateDeg = Math.min(1.05, sway * 0.075) * intensity;
+  const xPx = Math.min(72, sway * 3.8 * horizontalIntensity);
+  const yPx = Math.min(28, pitchSway * 10 * verticalIntensity);
+  const rotateDeg = Math.min(1.05, sway * 0.075 * rotationIntensity);
   const durationSec = Math.min(34, Math.max(4, 10 / drift));
   // The floor covers small kiosks; amplitude padding includes an inverse-corner safety reserve.
   const amplitudePadding =
@@ -54,7 +57,7 @@ export function getStreetViewEffectStyle(
   const style: CSSProperties & Record<`--${string}`, string | number> = {
     filter,
     transform: floatEnabled ? undefined : "scale(1)",
-    transition: `${filterTransition}, transform 500ms ease`,
+    transition: `${filterTransition}, transform 500ms ease, --wander-float-x 1.2s ease, --wander-float-y 1.2s ease, --wander-float-rotate 1.2s ease, --wander-float-scale 1.2s ease`,
     transformOrigin: "center center",
     animation: floatEnabled
       ? `wander-look-float ${durationSec}s ease-in-out infinite`
