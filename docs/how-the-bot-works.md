@@ -83,8 +83,8 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 ### State flow
 
 1. **Wander:** move through Street View and periodically check local review candidates.
-2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and briefly hold the view.
-3. **Deliver:** optionally capture a screenshot while stopped, then read the selected review aloud with subtitles. The original HUD presentation remains unchanged: green Processing text with a white pulsing text glyph. After speech ends, remain on the exact reading view for two seconds.
+2. **Detect:** stop walking, play the entry bleep before moving the camera, turn toward the chosen business over a default 2.5 seconds with gentle easing, and hold the aligned view for 950 ms before speech starts.
+3. **Deliver:** pause the CSS wobble on its exact current frame, optionally capture a screenshot, then read the selected review aloud with subtitles. The original HUD presentation remains unchanged: green Processing text with a white pulsing text glyph. After speech ends, remain on the exact reading view for two seconds.
 4. **Return:** start the exit bloop immediately before the return pan begins, pan back toward the wander heading while the sound may still be playing, and resume walking only when the pan completes.
 5. **Teleport:** jump to a configured destination if the bot is stuck, imagery fails, leaves the review region, or city-tour timing advances.
 
@@ -108,7 +108,7 @@ If multiple reviews pass, the bot chooses by the configured mode: random, shorte
 | `queryDistanceThreshold` | 75 m | Minimum movement before another local candidate query can run |
 | `queryMinInterval` | 9,000 ms | Minimum time between local candidate queries |
 | `ALIGN_PAN_MS` | 2,500 ms | Gently eased camera turn toward the selected business |
-| `ALIGN_HOLD_MS` | 450 ms | Short hold facing the business before speech begins |
+| `ALIGN_HOLD_MS` | 950 ms | Hold facing the business after the pan and before speech begins |
 | `POST_TTS_HOLD_MS` | 2,000 ms | Still hold on the reading view after speech ends before the return pan begins |
 | Street View wobble | `WANDER`: ~69 px x / 9 px y; otherwise: ~14 px x / 5.5 px y | Maximum positive offsets on an eight-second CSS-only cycle; stationary motion persists through both turn states and is disabled with reduced motion |
 | `searchRadius` | 700 m | Kept for coverage visualization and settings continuity |

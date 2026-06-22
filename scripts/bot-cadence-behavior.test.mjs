@@ -56,6 +56,12 @@ assert.equal(
 );
 
 assert.equal(
+  numericConst("ALIGN_HOLD_MS"),
+  950,
+  "the bot should wait 950 ms after the business pan before speaking",
+);
+
+assert.equal(
   numericConst("RETURN_STATE_TIMER_MS"),
   1400,
   "return should be brief so reviews chain quickly",

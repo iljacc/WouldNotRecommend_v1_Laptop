@@ -232,6 +232,16 @@ assert(
   "Street View breathing should remain enabled during teleport.",
 );
 assert(
+  stoppedTeleportStyle.animationPlayState === "paused",
+  "Spoken delivery should freeze the exact current wobble frame.",
+);
+for (const [name, style] of [["WANDER", wanderStyle], ["DETECT", detectStyle], ["RETURN", returnStyle]]) {
+  assert(
+    style.animationPlayState === "running",
+    `${name} should keep the wobble running, including camera turns.`,
+  );
+}
+assert(
   stoppedX > 0 && stoppedX < wanderX,
   "Stopped Street View breathing should be numerically quieter than WANDER.",
 );

@@ -62,6 +62,8 @@ export function getStreetViewEffectStyle(
     animation: floatEnabled
       ? `wander-look-float ${durationSec}s ease-in-out infinite`
       : "none",
+    animationPlayState:
+      botState === BotState.DELIVER ? "paused" : "running",
     willChange: floatEnabled ? "transform, filter" : "filter",
     "--wander-float-x": `${xPx.toFixed(2)}px`,
     "--wander-float-y": `${yPx.toFixed(2)}px`,

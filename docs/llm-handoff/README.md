@@ -105,8 +105,9 @@ No Places API key is needed or used.
 - `/api/places` always serves local SQLite data.
 - When a review target is selected, the bot stops walking and plays the entry
   bleep before the camera moves. By default, it turns toward the business over
-  2.5 seconds with gentle easing, holds briefly, and then reads the review while
-  stopped.
+  2.5 seconds with gentle easing, holds the aligned view for 950 ms, and then
+  reads the review while stopped. The CSS wobble pauses on its exact current
+  frame throughout `DELIVER` and resumes for the `RETURN` pan.
   During speech, the original HUD presentation remains green Processing text
   with a white pulsing text glyph. After speech, a two-second stopped hold keeps
   the exact reading view on screen. The exit

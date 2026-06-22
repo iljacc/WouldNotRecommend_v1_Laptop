@@ -4,7 +4,7 @@ export const TIMING = {
   /** Rotation when facing the business from the road. */
   ALIGN_PAN_MS: 2_500,
   /** Hold (ms) after align pan finishes, still facing shop, before next state. */
-  ALIGN_HOLD_MS: 450,
+  ALIGN_HOLD_MS: 950,
   /** Hard cap for DETECT before review delivery starts, even if browser rendering pauses. */
   DETECT_MAX_WAIT_MS: 6_000,
   /** Legacy DETECT timer setting; the bot now advances after align pan + hold completes. */
